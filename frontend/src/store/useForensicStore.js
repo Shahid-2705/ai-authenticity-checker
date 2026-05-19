@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import axios from 'axios';
 import { forensicApi } from '../services/api';
 import useToastStore from './useToastStore';
 
@@ -7,6 +8,9 @@ const createAnalysisSlice = () => ({
   results: null,
   error: null,
 });
+
+// AbortControllers live outside Zustand state (non-serializable).
+const abortControllers = new Map();
 
 /**
  * Normalize an API envelope response into a flat results object.
@@ -76,9 +80,12 @@ const useForensicStore = create((set) => ({
   // --- Analysis Actions ---
 
   runImageAnalysis: async (file, mode) => {
+    abortControllers.get('image')?.abort();
+    const controller = new AbortController();
+    abortControllers.set('image', controller);
     set({ imageAnalysis: { isAnalyzing: true, results: null, error: null } });
     try {
-      const data = await forensicApi.analyzeImage(file, mode);
+      const data = await forensicApi.analyzeImage(file, mode, { signal: controller.signal });
       if (data.success) {
         set({ imageAnalysis: { isAnalyzing: false, results: normalizeResults(data), error: null } });
         useToastStore.getState().addToast('Image analysis complete', 'success');
@@ -87,15 +94,21 @@ const useForensicStore = create((set) => ({
         useToastStore.getState().addToast(data.error || 'Image analysis failed', 'error');
       }
     } catch (err) {
+      if (axios.isCancel(err) || err.name === 'AbortError' || err.name === 'CanceledError') return;
       set({ imageAnalysis: { isAnalyzing: false, results: null, error: extractError(err) } });
       useToastStore.getState().addToast(extractError(err), 'error');
+    } finally {
+      abortControllers.delete('image');
     }
   },
 
   runVideoAnalysis: async (file, fps, aggregation) => {
+    abortControllers.get('video')?.abort();
+    const controller = new AbortController();
+    abortControllers.set('video', controller);
     set({ videoAnalysis: { isAnalyzing: true, results: null, error: null } });
     try {
-      const data = await forensicApi.analyzeVideo(file, fps, aggregation);
+      const data = await forensicApi.analyzeVideo(file, fps, aggregation, { signal: controller.signal });
       if (data.success) {
         set({ videoAnalysis: { isAnalyzing: false, results: normalizeResults(data), error: null } });
         useToastStore.getState().addToast('Video analysis complete', 'success');
@@ -104,15 +117,21 @@ const useForensicStore = create((set) => ({
         useToastStore.getState().addToast(data.error || 'Video analysis failed', 'error');
       }
     } catch (err) {
+      if (axios.isCancel(err) || err.name === 'AbortError' || err.name === 'CanceledError') return;
       set({ videoAnalysis: { isAnalyzing: false, results: null, error: extractError(err) } });
       useToastStore.getState().addToast(extractError(err), 'error');
+    } finally {
+      abortControllers.delete('video');
     }
   },
 
   runAudioAnalysis: async (file) => {
+    abortControllers.get('audio')?.abort();
+    const controller = new AbortController();
+    abortControllers.set('audio', controller);
     set({ audioAnalysis: { isAnalyzing: true, results: null, error: null } });
     try {
-      const data = await forensicApi.analyzeAudio(file);
+      const data = await forensicApi.analyzeAudio(file, { signal: controller.signal });
       if (data.success) {
         set({ audioAnalysis: { isAnalyzing: false, results: normalizeResults(data), error: null } });
         useToastStore.getState().addToast('Audio analysis complete', 'success');
@@ -121,15 +140,21 @@ const useForensicStore = create((set) => ({
         useToastStore.getState().addToast(data.error || 'Audio analysis failed', 'error');
       }
     } catch (err) {
+      if (axios.isCancel(err) || err.name === 'AbortError' || err.name === 'CanceledError') return;
       set({ audioAnalysis: { isAnalyzing: false, results: null, error: extractError(err) } });
       useToastStore.getState().addToast(extractError(err), 'error');
+    } finally {
+      abortControllers.delete('audio');
     }
   },
 
   runMultimodalAnalysis: async (image, video, audio) => {
+    abortControllers.get('multimodal')?.abort();
+    const controller = new AbortController();
+    abortControllers.set('multimodal', controller);
     set({ multimodalAnalysis: { isAnalyzing: true, results: null, error: null } });
     try {
-      const data = await forensicApi.analyzeMultimodal(image, video, audio);
+      const data = await forensicApi.analyzeMultimodal(image, video, audio, { signal: controller.signal });
       if (data.success) {
         set({ multimodalAnalysis: { isAnalyzing: false, results: normalizeResults(data), error: null } });
         useToastStore.getState().addToast('Multimodal analysis complete', 'success');
@@ -138,8 +163,19 @@ const useForensicStore = create((set) => ({
         useToastStore.getState().addToast(data.error || 'Multimodal analysis failed', 'error');
       }
     } catch (err) {
+      if (axios.isCancel(err) || err.name === 'AbortError' || err.name === 'CanceledError') return;
       set({ multimodalAnalysis: { isAnalyzing: false, results: null, error: extractError(err) } });
       useToastStore.getState().addToast(extractError(err), 'error');
+    } finally {
+      abortControllers.delete('multimodal');
+    }
+  },
+
+  cancelAnalysis: (type) => {
+    const controller = abortControllers.get(type);
+    if (controller) {
+      controller.abort();
+      abortControllers.delete(type);
     }
   },
 

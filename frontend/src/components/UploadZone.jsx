@@ -33,11 +33,6 @@ export default function UploadZone({
     };
   }, []);
 
-  // Accept an initial file from drag-drop on Dashboard
-  useEffect(() => {
-    if (initialFile) handleFile(initialFile);
-  }, [initialFile]);
-
   const handleFile = useCallback(
     (file) => {
       setRejected(false);
@@ -75,6 +70,11 @@ export default function UploadZone({
     },
     [accept, onFileSelect, maxSizeMB],
   );
+
+  // Accept an initial file from drag-drop on Dashboard
+  useEffect(() => {
+    if (initialFile) handleFile(initialFile);
+  }, [initialFile, handleFile]);
 
   const handleDrop = useCallback(
     (e) => {

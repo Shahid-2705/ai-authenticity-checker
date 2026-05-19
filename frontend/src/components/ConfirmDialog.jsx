@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { AlertTriangle } from 'lucide-react';
 
 /**
@@ -21,6 +21,7 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }) {
+  const dialogRef = useRef(null);
   const confirmRef = useRef(null);
 
   // Focus the confirm button when the dialog opens
@@ -40,6 +41,26 @@ export default function ConfirmDialog({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [open, onCancel]);
 
+  // Trap focus within the dialog
+  const handleKeyDown = useCallback((e) => {
+    if (e.key !== 'Tab' || !dialogRef.current) return;
+    const focusable = dialogRef.current.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else if (document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, []);
+
   if (!open) return null;
 
   return (
@@ -58,6 +79,8 @@ export default function ConfirmDialog({
 
       {/* Dialog */}
       <div
+        ref={dialogRef}
+        onKeyDown={handleKeyDown}
         className="relative z-10 w-full max-w-sm rounded-xl p-6 bg-bg-card border border-border-mid shadow-modal"
       >
         <div className="flex items-start gap-3 mb-4">

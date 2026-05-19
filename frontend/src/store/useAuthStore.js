@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { supabase, isAuthEnabled } from '../services/supabase';
 
+// Holds the Supabase auth subscription so we can clean it up
+// before registering a new one (e.g. React StrictMode double-mount).
+let authSubscription = null;
+
 const useAuthStore = create((set) => ({
   user: null,
   session: null,
@@ -12,6 +16,12 @@ const useAuthStore = create((set) => ({
       return;
     }
 
+    // Clean up any previous listener before registering a new one
+    if (authSubscription) {
+      authSubscription.unsubscribe();
+      authSubscription = null;
+    }
+
     const { data: { session } } = await supabase.auth.getSession();
     set({
       session,
@@ -19,12 +29,13 @@ const useAuthStore = create((set) => ({
       isLoading: false,
     });
 
-    supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       set({
         session,
         user: session?.user ?? null,
       });
     });
+    authSubscription = subscription;
   },
 
   signIn: async (email, password) => {

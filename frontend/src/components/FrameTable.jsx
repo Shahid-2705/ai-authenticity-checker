@@ -1,4 +1,5 @@
 import React from 'react';
+import { getRiskColorRaw, getRiskGlow, normalizeScore } from '../utils/risk';
 
 const COLUMNS = [
   { key: 0, label: 'Frame', title: 'Frame number' },
@@ -13,20 +14,6 @@ const COLUMNS = [
   { key: 9, label: 'DINO',  title: 'DINOv2 model score' },
   { key: 10, label: 'Eff',  title: 'EfficientNet score' },
 ];
-
-function getRiskColor(value) {
-  const risk = parseFloat(value) || 0;
-  if (risk > 0.70) return '#FB7185';
-  if (risk > 0.40) return '#FBBF24';
-  return '#34D399';
-}
-
-function getRiskGlow(value) {
-  const risk = parseFloat(value) || 0;
-  if (risk > 0.70) return '0 0 6px rgba(251,113,133,0.3)';
-  if (risk > 0.40) return '0 0 6px rgba(251,191,36,0.3)';
-  return 'none';
-}
 
 export default function FrameTable({ framesRawStr }) {
   if (!framesRawStr) return null;
@@ -61,8 +48,8 @@ export default function FrameTable({ framesRawStr }) {
               <span
                 className="text-xs font-mono font-bold px-2 py-0.5 rounded"
                 style={{
-                  color: getRiskColor(row[2]),
-                  background: `${getRiskColor(row[2])}18`,
+                  color: getRiskColorRaw(normalizeScore(row[2])),
+                  background: `${getRiskColorRaw(normalizeScore(row[2]))}18`,
                 }}
               >
                 Risk: {row[2]}
@@ -123,7 +110,10 @@ export default function FrameTable({ framesRawStr }) {
                       <td
                         key={col.key}
                         className="px-3 py-2 font-mono font-bold"
-                        style={{ color: getRiskColor(value), textShadow: getRiskGlow(value) }}
+                        style={{
+                          color: getRiskColorRaw(normalizeScore(value)),
+                          textShadow: normalizeScore(value) > 40 ? `0 0 6px ${getRiskGlow(normalizeScore(value))}` : 'none',
+                        }}
                       >
                         {value}
                       </td>

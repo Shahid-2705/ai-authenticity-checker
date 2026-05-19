@@ -86,8 +86,7 @@ export default function VideoAnalysis() {
                   type="range" min="1" max="15" step="0.5"
                   value={fps}
                   onChange={(e) => setFps(Number(e.target.value))}
-                  className="w-full h-1 rounded-full cursor-pointer appearance-none bg-border-mid"
-                  style={{ accentColor: 'var(--accent)' }}
+                  className="w-full h-1 rounded-full cursor-pointer appearance-none bg-border-mid [accent-color:var(--accent)]"
                 />
               </div>
 

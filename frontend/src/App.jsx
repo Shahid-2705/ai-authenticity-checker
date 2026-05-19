@@ -45,6 +45,16 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
+/** Redirect authenticated users away from login/signup/forgot pages. */
+function GuestRoute({ children }) {
+  const { user, isLoading } = useAuthStore();
+
+  if (!isAuthEnabled()) return children;
+  if (isLoading) return null;
+  if (user) return <Navigate to="/" replace />;
+  return children;
+}
+
 function App() {
   const { initialize } = useAuthStore();
 
@@ -56,10 +66,10 @@ function App() {
     <ErrorBoundary>
       <BrowserRouter>
         <Routes>
-          {/* Public auth routes */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
+          {/* Guest-only auth routes — redirect to / if already logged in */}
+          <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
+          <Route path="/signup" element={<GuestRoute><Signup /></GuestRoute>} />
+          <Route path="/forgot-password" element={<GuestRoute><ForgotPassword /></GuestRoute>} />
 
           {/* Protected app routes */}
           <Route
@@ -78,6 +88,9 @@ function App() {
             <Route path="history" element={<Suspense fallback={<PageLoader />}><History /></Suspense>} />
             <Route path="system" element={<Suspense fallback={<PageLoader />}><SystemStatus /></Suspense>} />
           </Route>
+
+          {/* Catch-all: redirect unknown paths to dashboard */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </ErrorBoundary>

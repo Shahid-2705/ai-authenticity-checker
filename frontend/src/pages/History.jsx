@@ -233,11 +233,7 @@ export default function History() {
         <div className="table-scroll">
           <table className="w-full text-left min-w-[640px]">
             <thead>
-              <tr style={{
-                background: 'linear-gradient(135deg, rgba(59,130,246,0.08), rgba(6,182,212,0.04))',
-              }}
-                className="border-b border-border-glow"
-              >
+              <tr className="bg-gradient-to-br from-[rgba(59,130,246,0.08)] to-[rgba(6,182,212,0.04)] border-b border-border-glow">
                 {['Time', 'Type', 'File', 'Risk', 'Verdict', 'Confidence', ''].map((h) => (
                   <th
                     key={h}
