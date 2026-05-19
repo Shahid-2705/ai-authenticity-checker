@@ -44,8 +44,7 @@ history = AnalysisHistory()
 limiter = Limiter(key_func=get_remote_address)
 
 # Serialize GPU inference — prevents concurrent model.forward() calls from
-# corrupting CUDA state or producing wrong results.  Set > 1 only if models
-# are isolated per-worker or you have verified thread-safe inference.
+# corrupting CUDA state or producing wrong results.
 _MAX_CONCURRENT_INFERENCE = int(os.environ.get("PROOFYX_MAX_CONCURRENT", "1"))
 _inference_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_INFERENCE)
 
@@ -77,6 +76,9 @@ MAGIC_BYTES: dict[str, list[bytes]] = {
     ".tiff": [b"II\x2a\x00", b"MM\x00\x2a"],
 }
 
+# Fields to strip from results before returning to clients
+_STRIP_FIELDS = {"gradcam_image", "original_image"}
+
 
 def _validate_magic_bytes(contents: bytes, ext: str) -> None:
     """Validate file contents match expected magic bytes for the extension."""
@@ -95,7 +97,7 @@ def _validate_magic_bytes(contents: bytes, ext: str) -> None:
 async def _read_validated(
     file: UploadFile, max_size: int, allowed_ext: set[str],
 ) -> bytes:
-    """Read and validate an uploaded file (size + extension + magic bytes for images)."""
+    """Read and validate an uploaded file (size + extension + magic bytes)."""
     ext = ""
     if file.filename:
         ext = os.path.splitext(file.filename)[1].lower()
@@ -107,7 +109,6 @@ async def _read_validated(
         max_mb = max_size // (1024 * 1024)
         raise HTTPException(status_code=413, detail=f"File too large. Maximum: {max_mb}MB")
 
-    # Validate magic bytes for image uploads (video/audio containers are too complex)
     if ext in ALLOWED_IMAGE_EXT:
         _validate_magic_bytes(contents, ext)
 
@@ -129,17 +130,9 @@ async def _run_with_timeout(
     *args: Any,
     **kwargs: Any,
 ) -> Any:
-    """Run a sync function in a thread pool with a timeout.
-
-    Acquires the inference semaphore first to prevent concurrent GPU access,
-    then runs *fn* in a worker thread with *timeout* seconds deadline.
-    Raises HTTP 504 on timeout, HTTP 503 if the semaphore cannot be acquired
-    within 5 seconds (server overloaded).
-    """
+    """Run a sync function in a thread pool with a timeout and GPU semaphore."""
     try:
-        acquired = await asyncio.wait_for(
-            _inference_semaphore.acquire(), timeout=5.0,
-        )
+        await asyncio.wait_for(_inference_semaphore.acquire(), timeout=5.0)
     except asyncio.TimeoutError:
         raise HTTPException(
             status_code=503,
@@ -152,15 +145,44 @@ async def _run_with_timeout(
             timeout=timeout,
         )
     except asyncio.TimeoutError:
-        logger.warning(
-            "Analysis timed out after %ds: %s", timeout, fn.__name__,
-        )
-        raise HTTPException(
-            status_code=504,
-            detail=f"Analysis timed out after {timeout}s",
-        )
+        logger.warning("Analysis timed out after %ds: %s", timeout, fn.__name__)
+        raise HTTPException(status_code=504, detail=f"Analysis timed out after {timeout}s")
     finally:
         _inference_semaphore.release()
+
+
+async def _save_and_build_response(
+    pipeline_result: dict[str, Any],
+    file_name: str,
+    user_id: Optional[str],
+    result_model: type,
+) -> tuple[str, str, dict[str, Any]]:
+    """Create a new record from pipeline output without mutating the original.
+
+    Returns (analysis_id, timestamp, filtered_fields_dict).
+    """
+    analysis_id = str(uuid.uuid4())
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    # Build history record without mutating the pipeline result
+    history_record = {
+        **pipeline_result,
+        "id": analysis_id,
+        "timestamp": timestamp,
+        "file_name": file_name,
+    }
+    await history.save(history_record, user_id=user_id)
+
+    # Filter to only fields the response model accepts, stripping large blobs
+    response_fields = {
+        k: v
+        for k, v in pipeline_result.items()
+        if k in result_model.model_fields
+        and k not in ("id", "timestamp")
+        and k not in _STRIP_FIELDS
+    }
+
+    return analysis_id, timestamp, response_fields
 
 
 # ──────────────────────────────────────────────
@@ -185,27 +207,17 @@ async def api_analyze_image(
 
     result = await _run_with_timeout(analyze_image, TIMEOUT_IMAGE, image, mode=mode)
 
-    if "error" in result and result["error"]:
+    if result.get("error"):
         return ImageAnalysisResponse(success=False, error=result["error"])
 
-    analysis_id = str(uuid.uuid4())
-    timestamp = datetime.now(timezone.utc).isoformat()
     user_id = current_user["id"] if current_user else None
-
-    result["id"] = analysis_id
-    result["timestamp"] = timestamp
-    result["file_name"] = file.filename or ""
-    await history.save(result, user_id=user_id)
-
-    result.pop("gradcam_image", None)
-    result.pop("original_image", None)
+    analysis_id, timestamp, fields = await _save_and_build_response(
+        result, file.filename or "", user_id, ImageAnalysisResult,
+    )
 
     return ImageAnalysisResponse(
         success=True,
-        data=ImageAnalysisResult(id=analysis_id, timestamp=timestamp, **{
-            k: v for k, v in result.items()
-            if k in ImageAnalysisResult.model_fields and k not in ("id", "timestamp")
-        }),
+        data=ImageAnalysisResult(id=analysis_id, timestamp=timestamp, **fields),
     )
 
 
@@ -237,23 +249,17 @@ async def api_analyze_video(
     finally:
         _safe_tmp_remove(tmp_path)
 
-    if "error" in result and result["error"]:
+    if result.get("error"):
         return VideoAnalysisResponse(success=False, error=result["error"])
 
-    analysis_id = str(uuid.uuid4())
-    timestamp = datetime.now(timezone.utc).isoformat()
     user_id = current_user["id"] if current_user else None
-    result["id"] = analysis_id
-    result["timestamp"] = timestamp
-    result["file_name"] = file.filename or ""
-    await history.save(result, user_id=user_id)
+    analysis_id, timestamp, fields = await _save_and_build_response(
+        result, file.filename or "", user_id, VideoAnalysisResult,
+    )
 
     return VideoAnalysisResponse(
         success=True,
-        data=VideoAnalysisResult(id=analysis_id, timestamp=timestamp, **{
-            k: v for k, v in result.items()
-            if k in VideoAnalysisResult.model_fields and k not in ("id", "timestamp")
-        }),
+        data=VideoAnalysisResult(id=analysis_id, timestamp=timestamp, **fields),
     )
 
 
@@ -281,23 +287,17 @@ async def api_analyze_audio(
     finally:
         _safe_tmp_remove(tmp_path)
 
-    if "error" in result and result["error"]:
+    if result.get("error"):
         return AudioAnalysisResponse(success=False, error=result["error"])
 
-    analysis_id = str(uuid.uuid4())
-    timestamp = datetime.now(timezone.utc).isoformat()
     user_id = current_user["id"] if current_user else None
-    result["id"] = analysis_id
-    result["timestamp"] = timestamp
-    result["file_name"] = file.filename or ""
-    await history.save(result, user_id=user_id)
+    analysis_id, timestamp, fields = await _save_and_build_response(
+        result, file.filename or "", user_id, AudioAnalysisResult,
+    )
 
     return AudioAnalysisResponse(
         success=True,
-        data=AudioAnalysisResult(id=analysis_id, timestamp=timestamp, **{
-            k: v for k, v in result.items()
-            if k in AudioAnalysisResult.model_fields and k not in ("id", "timestamp")
-        }),
+        data=AudioAnalysisResult(id=analysis_id, timestamp=timestamp, **fields),
     )
 
 
@@ -346,12 +346,8 @@ async def api_analyze_multimodal(
         _safe_tmp_remove(video_path)
         _safe_tmp_remove(audio_path)
 
-    if "error" in result and result["error"]:
+    if result.get("error"):
         return MultimodalAnalysisResponse(success=False, error=result["error"])
-
-    analysis_id = str(uuid.uuid4())
-    timestamp = datetime.now(timezone.utc).isoformat()
-    user_id = current_user["id"] if current_user else None
 
     # Determine file_name from first available upload
     file_name = ""
@@ -360,17 +356,14 @@ async def api_analyze_multimodal(
             file_name = upload.filename
             break
 
-    result["id"] = analysis_id
-    result["timestamp"] = timestamp
-    result["file_name"] = file_name
-    await history.save(result, user_id=user_id)
+    user_id = current_user["id"] if current_user else None
+    analysis_id, timestamp, fields = await _save_and_build_response(
+        result, file_name, user_id, MultimodalAnalysisResult,
+    )
 
     return MultimodalAnalysisResponse(
         success=True,
-        data=MultimodalAnalysisResult(id=analysis_id, timestamp=timestamp, **{
-            k: v for k, v in result.items()
-            if k in MultimodalAnalysisResult.model_fields and k not in ("id", "timestamp")
-        }),
+        data=MultimodalAnalysisResult(id=analysis_id, timestamp=timestamp, **fields),
     )
 
 
@@ -424,7 +417,4 @@ async def health_check():
     """Health check endpoint — reports degraded when no models are loaded."""
     reg = get_registry()
     status = "healthy" if reg.loaded else "degraded"
-    return HealthResponse(
-        status=status,
-        models_loaded=len(reg.loaded),
-    )
+    return HealthResponse(status=status, models_loaded=len(reg.loaded))

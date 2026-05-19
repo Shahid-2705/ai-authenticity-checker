@@ -45,6 +45,12 @@ const useAuthStore = create((set) => ({
     return { data, error };
   },
 
+  resetPassword: async (email) => {
+    if (!isAuthEnabled()) return { error: { message: 'Auth not configured' } };
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    return { error };
+  },
+
   signOut: async () => {
     if (!isAuthEnabled()) return;
     await supabase.auth.signOut();

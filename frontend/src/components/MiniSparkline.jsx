@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 export default function MiniSparkline({ data = [], color = 'var(--accent)', width = 60, height = 24 }) {
+  const gradientId = useId();
+
   if (data.length < 2) return null;
 
   const min = Math.min(...data);
@@ -12,8 +14,6 @@ export default function MiniSparkline({ data = [], color = 'var(--accent)', widt
     const y = height - ((v - min) / range) * (height - 2) - 1;
     return `${x},${y}`;
   });
-
-  const gradientId = `spark-${Math.random().toString(36).slice(2, 8)}`;
 
   return (
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="block">

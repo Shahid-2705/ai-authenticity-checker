@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { forensicApi } from '../services/api';
+import useToastStore from './useToastStore';
 
 const createAnalysisSlice = () => ({
   isAnalyzing: false,
@@ -7,8 +8,42 @@ const createAnalysisSlice = () => ({
   error: null,
 });
 
-const useForensicStore = create((set, get) => ({
-  // System Status State
+/**
+ * Normalize an API envelope response into a flat results object.
+ *
+ * The API returns `{ success, data: { risk_score, ... }, error }`.
+ * Previously, stores saved the raw envelope and components had to guess
+ * between `results.risk_percentage`, `results.data?.risk_percent`, etc.
+ *
+ * Now the store always unwraps `data` so components get a flat shape:
+ *   results.risk_percent, results.verdict, results.model_scores, ...
+ */
+function normalizeResults(apiResponse) {
+  if (!apiResponse) return null;
+
+  // If the API returned {success, data: {...}}, unwrap `data`
+  const raw = apiResponse.data || apiResponse;
+
+  // Ensure risk_percent always exists (some endpoints return risk_score 0-1)
+  const riskScore = raw.risk_score ?? 0;
+  const riskPercent = raw.risk_percent ?? riskScore * 100;
+
+  return {
+    ...raw,
+    risk_score: riskScore,
+    risk_percent: riskPercent,
+    // Legacy aliases that some components referenced
+    risk_percentage: riskPercent,
+    authenticity_percentage: raw.authenticity_score ?? (100 - riskPercent),
+  };
+}
+
+function extractError(err) {
+  return err.response?.data?.error || err.response?.data?.detail || err.message || 'An error occurred';
+}
+
+const useForensicStore = create((set) => ({
+  // System Status
   systemStatus: {
     loaded_models: [],
     missing_models: [],
@@ -16,11 +51,12 @@ const useForensicStore = create((set, get) => ({
     fusion_mlp_available: false,
     vit_available: false,
     device: 'cpu',
+    total: 0,
   },
   isStatusLoading: true,
   statusError: null,
 
-  // History State
+  // History
   history: [],
   historyTotal: 0,
   isHistoryLoading: false,
@@ -32,18 +68,27 @@ const useForensicStore = create((set, get) => ({
   audioAnalysis: createAnalysisSlice(),
   multimodalAnalysis: createAnalysisSlice(),
 
-  // Analysis actions
+  // Pending file from drag-drop on Dashboard
+  pendingFile: null,
+  setPendingFile: (file) => set({ pendingFile: file }),
+  clearPendingFile: () => set({ pendingFile: null }),
+
+  // --- Analysis Actions ---
+
   runImageAnalysis: async (file, mode) => {
     set({ imageAnalysis: { isAnalyzing: true, results: null, error: null } });
     try {
       const data = await forensicApi.analyzeImage(file, mode);
       if (data.success) {
-        set({ imageAnalysis: { isAnalyzing: false, results: data, error: null } });
+        set({ imageAnalysis: { isAnalyzing: false, results: normalizeResults(data), error: null } });
+        useToastStore.getState().addToast('Image analysis complete', 'success');
       } else {
         set({ imageAnalysis: { isAnalyzing: false, results: null, error: data.error || 'Analysis failed' } });
+        useToastStore.getState().addToast(data.error || 'Image analysis failed', 'error');
       }
     } catch (err) {
-      set({ imageAnalysis: { isAnalyzing: false, results: null, error: err.response?.data?.error || err.message || 'An error occurred' } });
+      set({ imageAnalysis: { isAnalyzing: false, results: null, error: extractError(err) } });
+      useToastStore.getState().addToast(extractError(err), 'error');
     }
   },
 
@@ -52,12 +97,15 @@ const useForensicStore = create((set, get) => ({
     try {
       const data = await forensicApi.analyzeVideo(file, fps, aggregation);
       if (data.success) {
-        set({ videoAnalysis: { isAnalyzing: false, results: data, error: null } });
+        set({ videoAnalysis: { isAnalyzing: false, results: normalizeResults(data), error: null } });
+        useToastStore.getState().addToast('Video analysis complete', 'success');
       } else {
         set({ videoAnalysis: { isAnalyzing: false, results: null, error: data.error || 'Analysis failed' } });
+        useToastStore.getState().addToast(data.error || 'Video analysis failed', 'error');
       }
     } catch (err) {
-      set({ videoAnalysis: { isAnalyzing: false, results: null, error: err.response?.data?.error || err.message || 'An error occurred' } });
+      set({ videoAnalysis: { isAnalyzing: false, results: null, error: extractError(err) } });
+      useToastStore.getState().addToast(extractError(err), 'error');
     }
   },
 
@@ -66,12 +114,15 @@ const useForensicStore = create((set, get) => ({
     try {
       const data = await forensicApi.analyzeAudio(file);
       if (data.success) {
-        set({ audioAnalysis: { isAnalyzing: false, results: data, error: null } });
+        set({ audioAnalysis: { isAnalyzing: false, results: normalizeResults(data), error: null } });
+        useToastStore.getState().addToast('Audio analysis complete', 'success');
       } else {
         set({ audioAnalysis: { isAnalyzing: false, results: null, error: data.error || 'Analysis failed' } });
+        useToastStore.getState().addToast(data.error || 'Audio analysis failed', 'error');
       }
     } catch (err) {
-      set({ audioAnalysis: { isAnalyzing: false, results: null, error: err.response?.data?.error || err.message || 'An error occurred' } });
+      set({ audioAnalysis: { isAnalyzing: false, results: null, error: extractError(err) } });
+      useToastStore.getState().addToast(extractError(err), 'error');
     }
   },
 
@@ -80,12 +131,15 @@ const useForensicStore = create((set, get) => ({
     try {
       const data = await forensicApi.analyzeMultimodal(image, video, audio);
       if (data.success) {
-        set({ multimodalAnalysis: { isAnalyzing: false, results: data, error: null } });
+        set({ multimodalAnalysis: { isAnalyzing: false, results: normalizeResults(data), error: null } });
+        useToastStore.getState().addToast('Multimodal analysis complete', 'success');
       } else {
         set({ multimodalAnalysis: { isAnalyzing: false, results: null, error: data.error || 'Analysis failed' } });
+        useToastStore.getState().addToast(data.error || 'Multimodal analysis failed', 'error');
       }
     } catch (err) {
-      set({ multimodalAnalysis: { isAnalyzing: false, results: null, error: err.response?.data?.error || err.message || 'An error occurred' } });
+      set({ multimodalAnalysis: { isAnalyzing: false, results: null, error: extractError(err) } });
+      useToastStore.getState().addToast(extractError(err), 'error');
     }
   },
 
@@ -97,27 +151,23 @@ const useForensicStore = create((set, get) => ({
     set({ isStatusLoading: true, statusError: null });
     try {
       const data = await forensicApi.getStatus();
+      const loaded = data.loaded || [];
       set({
         systemStatus: {
-          loaded_models: data.loaded || [],
+          loaded_models: loaded,
           missing_models: data.missing || [],
           corefakenet_available: data.corefakenet_ready || false,
-          fusion_mlp_available: (data.loaded || []).some(
+          fusion_mlp_available: loaded.some(
             (m) => m.toLowerCase().includes('fusion') || m.toLowerCase().includes('mlp'),
           ),
-          vit_available: (data.loaded || []).some(
-            (m) => m.toLowerCase().includes('vit'),
-          ),
+          vit_available: loaded.some((m) => m.toLowerCase().includes('vit')),
           device: 'auto',
           total: data.total || 0,
         },
         isStatusLoading: false,
       });
     } catch (error) {
-      set({
-        statusError: error.response?.data?.error || error.message,
-        isStatusLoading: false,
-      });
+      set({ statusError: extractError(error), isStatusLoading: false });
     }
   },
 
@@ -131,10 +181,7 @@ const useForensicStore = create((set, get) => ({
         isHistoryLoading: false,
       });
     } catch (error) {
-      set({
-        historyError: error.response?.data?.error || error.message,
-        isHistoryLoading: false,
-      });
+      set({ historyError: extractError(error), isHistoryLoading: false });
     }
   },
 }));

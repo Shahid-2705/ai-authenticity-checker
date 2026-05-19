@@ -1,15 +1,80 @@
-import React, { useCallback, useState } from 'react';
-import { UploadCloud, Check, RefreshCw } from 'lucide-react';
+import React, { useCallback, useState, useRef, useEffect } from 'react';
+import { UploadCloud, Check, RefreshCw, AlertCircle } from 'lucide-react';
+import { isFileAccepted } from '../utils/format';
 
-const FORMAT_BADGES = ['JPG', 'PNG', 'MP4', 'WAV', 'MP3'];
+const FORMAT_LABELS = {
+  'image/*': ['JPG', 'PNG', 'WEBP'],
+  'video/*': ['MP4', 'AVI', 'MOV'],
+  'audio/*': ['WAV', 'MP3', 'FLAC'],
+};
 
 export default function UploadZone({
   onFileSelect,
   accept = 'image/*',
   label = 'Drag & drop or click to browse',
+  initialFile = null,
+  maxSizeMB = 500,
 }) {
   const [isDragActive, setIsDragActive] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [rejected, setRejected] = useState(false);
+  const [sizeError, setSizeError] = useState(false);
+  const blobUrlRef = useRef(null);
+
+  const badges = FORMAT_LABELS[accept] || ['JPG', 'PNG', 'MP4', 'WAV'];
+
+  // Clean up blob URL on unmount or when preview changes
+  useEffect(() => {
+    return () => {
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  // Accept an initial file from drag-drop on Dashboard
+  useEffect(() => {
+    if (initialFile) handleFile(initialFile);
+  }, [initialFile]);
+
+  const handleFile = useCallback(
+    (file) => {
+      setRejected(false);
+      setSizeError(false);
+
+      // Client-side type validation
+      if (!isFileAccepted(file, accept)) {
+        setRejected(true);
+        setTimeout(() => setRejected(false), 3000);
+        return;
+      }
+
+      // Client-side size validation
+      if (maxSizeMB > 0 && file.size > maxSizeMB * 1024 * 1024) {
+        setSizeError(true);
+        setTimeout(() => setSizeError(false), 4000);
+        return;
+      }
+
+      // Revoke previous blob URL
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
+
+      onFileSelect(file);
+
+      if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+        const url = URL.createObjectURL(file);
+        blobUrlRef.current = url;
+        setPreview({ url, type: file.type, name: file.name });
+      } else {
+        setPreview({ name: file.name, type: file.type });
+      }
+    },
+    [accept, onFileSelect, maxSizeMB],
+  );
 
   const handleDrop = useCallback(
     (e) => {
@@ -18,94 +83,79 @@ export default function UploadZone({
       const file = e.dataTransfer.files[0];
       if (file) handleFile(file);
     },
-    []
+    [handleFile],
   );
 
-  const handleChange = (e) => {
-    const file = e.target.files[0];
-    if (file) handleFile(file);
-  };
-
-  const handleFile = (file) => {
-    onFileSelect(file);
-    if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
-      setPreview({ url: URL.createObjectURL(file), type: file.type, name: file.name });
-    } else {
-      setPreview({ name: file.name, type: file.type });
-    }
-  };
+  const handleChange = useCallback(
+    (e) => {
+      const file = e.target.files[0];
+      if (file) handleFile(file);
+    },
+    [handleFile],
+  );
 
   return (
     <div
       onDragOver={(e) => { e.preventDefault(); setIsDragActive(true); }}
       onDragLeave={() => setIsDragActive(false)}
       onDrop={handleDrop}
-      className="relative w-full h-56 rounded-lg flex flex-col items-center justify-center overflow-hidden cursor-pointer"
-      style={{
-        border: `2px dashed ${isDragActive ? 'var(--accent, #3B82F6)' : 'var(--border-mid, rgba(255,255,255,0.12))'}`,
-        background: isDragActive
-          ? 'rgba(59,130,246,0.05)'
-          : 'linear-gradient(180deg, var(--bg-inset, #0A0C12) 0%, var(--bg-card, #141820) 100%)',
-        boxShadow: isDragActive
-          ? 'inset 0 0 30px rgba(59,130,246,0.12)'
-          : '0 0 8px rgba(59,130,246,0.10)',
-        animation: isDragActive ? 'none' : 'borderGlow 3s ease-in-out infinite',
-        transition: 'border-color 0.2s ease, background 0.2s ease',
-      }}
+      className={`relative w-full rounded-xl flex flex-col items-center justify-center overflow-hidden cursor-pointer min-h-[200px] border-2 border-dashed transition-colors duration-200 ${
+        rejected || sizeError
+          ? 'border-risk-critical bg-risk-criticalDim'
+          : isDragActive
+            ? 'border-accent bg-[rgba(59,130,246,0.05)]'
+            : 'border-border-mid bg-bg-inset'
+      }`}
     >
       <input
         type="file"
         accept={accept}
         onChange={handleChange}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+        aria-label={label}
       />
 
-      {preview ? (
-        <div className="flex flex-col items-center justify-center z-20 text-center px-6">
+      {rejected || sizeError ? (
+        <div className="flex flex-col items-center justify-center z-20 text-center px-6 py-6">
+          <AlertCircle size={28} className="mb-2 text-risk-critical" />
+          <p className="text-sm font-medium text-risk-critical">
+            {sizeError ? 'File too large' : 'Unsupported file type'}
+          </p>
+          <p className="text-xs mt-1 text-text-2">
+            {sizeError
+              ? `Maximum file size is ${maxSizeMB} MB`
+              : `Please select a ${accept.replace('/*', '')} file`}
+          </p>
+        </div>
+      ) : preview ? (
+        <div className="flex flex-col items-center justify-center z-20 text-center px-6 py-6">
           <div className="flex items-center gap-2">
-            <Check size={14} style={{ color: 'var(--risk-clear, #34D399)' }} />
-            <span
-              className="text-[12px] font-medium truncate max-w-[200px]"
-              style={{ color: 'var(--text-1, #EDF0F7)' }}
-            >
+            <Check size={14} className="text-risk-clear" />
+            <span className="text-sm font-medium truncate max-w-[220px] text-text-1">
               {preview.name || 'File loaded'}
             </span>
           </div>
-          <p
-            className="text-[10px] mt-1.5 flex items-center gap-1"
-            style={{ color: 'var(--text-3, #4A5264)' }}
-          >
-            <RefreshCw size={9} /> Drop new file to replace
+          <p className="text-xs mt-2 flex items-center gap-1 text-text-2">
+            <RefreshCw size={10} /> Drop new file to replace
           </p>
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center z-20 pointer-events-none text-center px-6">
+        <div className="flex flex-col items-center justify-center z-20 pointer-events-none text-center px-6 py-6">
           <UploadCloud
-            size={32}
-            style={{
-              color: isDragActive
-                ? 'var(--accent, #3B82F6)'
-                : 'var(--text-3, #4A5264)',
-              marginBottom: '12px',
-              animation: 'breathe 3s ease-in-out infinite',
-            }}
+            size={30}
+            className={`mb-3 ${isDragActive ? 'text-accent' : 'text-text-3'}`}
           />
-          <p className="text-[12px] font-medium" style={{ color: 'var(--text-2, #8B95A5)' }}>
+          <p className="text-sm font-medium text-text-2">
             {label}
           </p>
-          <p className="text-[10px] mt-1" style={{ color: 'var(--text-3, #4A5264)' }}>
+          <p className="text-xs mt-1 text-text-3">
             Supports high-res forensic analysis
           </p>
           <div className="flex gap-1.5 mt-3">
-            {FORMAT_BADGES.map((ext) => (
+            {badges.map((ext) => (
               <span
                 key={ext}
-                className="text-[9px] px-1.5 py-0.5 rounded font-mono"
-                style={{
-                  background: 'var(--bg-elevated, #1C2130)',
-                  color: 'var(--text-3)',
-                  border: '1px solid var(--border-dim)',
-                }}
+                className="text-[10px] px-2 py-0.5 rounded font-mono bg-bg-elevated text-text-3 border border-border-dim"
               >
                 {ext}
               </span>

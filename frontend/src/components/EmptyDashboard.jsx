@@ -1,16 +1,10 @@
-import React from 'react';
+import React, { useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Shield, Upload, Cpu, CheckCircle, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-
-const fadeUp = {
-  hidden: { opacity: 0, y: 14 },
-  visible: (i = 0) => ({
-    opacity: 1,
-    y: 0,
-    transition: { delay: i * 0.1, duration: 0.45, ease: [0.22, 1, 0.36, 1] },
-  }),
-};
+import { staggerFadeUp } from '../utils/animations';
+import { detectMediaRoute } from '../utils/format';
+import useForensicStore from '../store/useForensicStore';
 
 const STEPS = [
   { icon: Upload, title: 'Upload Media', desc: 'Image, video, or audio file' },
@@ -20,98 +14,68 @@ const STEPS = [
 
 export default function EmptyDashboard() {
   const navigate = useNavigate();
+  const { setPendingFile } = useForensicStore();
+  const fileInputRef = useRef(null);
+
+  const handleFile = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPendingFile(file);
+    navigate(detectMediaRoute(file));
+  }, [navigate, setPendingFile]);
 
   return (
-    <motion.div
-      initial="hidden"
-      animate="visible"
-      className="flex flex-col items-center justify-center py-12 px-4"
-    >
-      {/* Pulsing shield icon */}
-      <motion.div variants={fadeUp} custom={0} className="relative mb-6">
-        <div
-          className="absolute inset-0 rounded-full"
-          style={{
-            background: 'radial-gradient(circle, rgba(59,130,246,0.25) 0%, transparent 70%)',
-            animation: 'pulseGlow 3s ease-in-out infinite',
-          }}
-        />
-        <div
-          className="relative w-20 h-20 rounded-2xl flex items-center justify-center"
-          style={{
-            background: 'var(--accent-dim)',
-            border: '1px solid rgba(59,130,246,0.25)',
-            boxShadow: '0 0 30px rgba(59,130,246,0.15)',
-          }}
-        >
-          <Shield size={36} style={{ color: 'var(--accent)' }} />
+    <motion.div initial="hidden" animate="visible" className="flex flex-col items-center justify-center py-12 px-4">
+      {/* Shield icon */}
+      <motion.div variants={staggerFadeUp} custom={0} className="mb-6">
+        <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-accent-dim border border-accent/20">
+          <Shield size={30} className="text-accent" />
         </div>
       </motion.div>
 
-      {/* Heading */}
-      <motion.h2
-        variants={fadeUp}
-        custom={1}
-        className="font-display text-2xl font-bold gradient-text mb-1"
-      >
+      <motion.h2 variants={staggerFadeUp} custom={1} className="font-display text-2xl font-bold gradient-text mb-1">
         System Ready
       </motion.h2>
-      <motion.p
-        variants={fadeUp}
-        custom={1.5}
-        className="text-[12px] mb-10"
-        style={{ color: 'var(--text-3)' }}
-      >
+      <motion.p variants={staggerFadeUp} custom={2} className="text-sm mb-8 text-text-3">
         No scans yet. Start your first forensic analysis in three steps.
       </motion.p>
 
       {/* Step cards */}
-      <motion.div
-        variants={fadeUp}
-        custom={2}
-        className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full max-w-2xl mb-10"
-      >
+      <motion.div variants={staggerFadeUp} custom={3} className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full max-w-xl mb-8">
         {STEPS.map((step, i) => {
           const Icon = step.icon;
           return (
-            <div
-              key={step.title}
-              className="card p-5 flex flex-col items-center text-center"
-            >
+            <div key={step.title} className="card p-5 flex flex-col items-center text-center">
               <div className="flex items-center gap-2 mb-3">
-                <span
-                  className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
-                  style={{
-                    background: 'var(--accent-dim)',
-                    color: 'var(--accent)',
-                    border: '1px solid rgba(59,130,246,0.2)',
-                  }}
-                >
+                <span className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold bg-accent-dim text-accent border border-accent/20">
                   {i + 1}
                 </span>
-                <Icon size={15} style={{ color: 'var(--accent)' }} />
+                <Icon size={15} className="text-accent" />
               </div>
-              <p className="text-[13px] font-semibold" style={{ color: 'var(--text-1)' }}>
-                {step.title}
-              </p>
-              <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-3)' }}>
-                {step.desc}
-              </p>
+              <p className="text-sm font-semibold text-text-1">{step.title}</p>
+              <p className="text-xs mt-0.5 text-text-3">{step.desc}</p>
             </div>
           );
         })}
       </motion.div>
 
-      {/* CTA */}
-      <motion.button
-        variants={fadeUp}
-        custom={3}
-        onClick={() => navigate('/image')}
-        className="btn-primary px-8 py-3 text-[13px]"
-      >
-        Start Your First Scan
-        <ArrowRight size={15} />
-      </motion.button>
+      <motion.div variants={staggerFadeUp} custom={4}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,video/*,audio/*"
+          onChange={handleFile}
+          className="hidden"
+          aria-label="Upload media file"
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="btn-primary px-8 py-3"
+        >
+          Start Your First Scan
+          <ArrowRight size={15} />
+        </button>
+      </motion.div>
     </motion.div>
   );
 }

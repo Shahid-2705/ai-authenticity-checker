@@ -1,49 +1,66 @@
 import React from 'react';
 import { AlertTriangle, CheckCircle, ShieldAlert } from 'lucide-react';
 
-export default function VerdictCard({ verdict }) {
-  if (!verdict) return null;
+/**
+ * Risk level tiers with explicit keyword lists.
+ * Order matters: critical is checked first, then caution, then fallback to clear.
+ *
+ * The `riskScore` prop (0-100) is used as the primary signal when available.
+ * Keyword matching on the verdict string is a fallback only.
+ */
+const CRITICAL_KEYWORDS = ['critical', 'fake', 'manipulat', 'deepfake', 'synthetic', 'forged', 'altered'];
+const CAUTION_KEYWORDS = ['medium', 'suspicious', 'caution', 'uncertain', 'inconclusive', 'partial'];
+const CLEAR_KEYWORDS = ['authentic', 'genuine', 'real', 'clear', 'low'];
 
-  const vUpper = verdict.toUpperCase();
+const TIERS = {
+  critical: {
+    Icon: ShieldAlert,
+    bgClass: 'bg-risk-criticalDim border-[rgba(251,113,133,0.15)]',
+    accentClass: 'text-risk-critical',
+  },
+  caution: {
+    Icon: AlertTriangle,
+    bgClass: 'bg-risk-cautionDim border-[rgba(251,191,36,0.15)]',
+    accentClass: 'text-risk-caution',
+  },
+  clear: {
+    Icon: CheckCircle,
+    bgClass: 'bg-risk-clearDim border-[rgba(52,211,153,0.15)]',
+    accentClass: 'text-risk-clear',
+  },
+};
 
-  let color, Icon, glowColor;
-
-  if (vUpper.includes('CRITICAL') || vUpper.includes('HIGH')) {
-    color = '#FB7185';
-    Icon = ShieldAlert;
-    glowColor = 'rgba(251,113,133,0.12)';
-  } else if (vUpper.includes('MEDIUM')) {
-    color = '#FBBF24';
-    Icon = AlertTriangle;
-    glowColor = 'rgba(251,191,36,0.12)';
-  } else {
-    color = '#34D399';
-    Icon = CheckCircle;
-    glowColor = 'rgba(52,211,153,0.12)';
+function classifyVerdict(verdict, riskScore) {
+  // Primary signal: numeric risk score when available
+  if (riskScore != null && typeof riskScore === 'number') {
+    if (riskScore > 70) return 'critical';
+    if (riskScore > 40) return 'caution';
+    return 'clear';
   }
 
+  // Fallback: keyword matching on verdict text
+  const lower = (verdict || '').toLowerCase();
+  if (CRITICAL_KEYWORDS.some((kw) => lower.includes(kw))) return 'critical';
+  if (CAUTION_KEYWORDS.some((kw) => lower.includes(kw))) return 'caution';
+  if (CLEAR_KEYWORDS.some((kw) => lower.includes(kw))) return 'clear';
+
+  // Default to caution when unable to classify
+  return 'caution';
+}
+
+export default function VerdictCard({ verdict, riskScore }) {
+  if (!verdict) return null;
+
+  const tier = classifyVerdict(verdict, riskScore);
+  const { Icon, bgClass, accentClass } = TIERS[tier];
+
   return (
-    <div
-      className="rounded-lg p-3 mt-3"
-      style={{
-        background: `${color}0F`,
-        border: `1px solid ${color}26`,
-        boxShadow: `0 0 16px ${glowColor}`,
-      }}
-    >
-      <div className="flex items-center gap-2 mb-1">
-        <Icon size={12} style={{ color }} />
-        <span
-          className="text-[9px] uppercase tracking-[0.12em] font-medium"
-          style={{ color }}
-        >
-          Verdict
-        </span>
+    <div className={`rounded-lg p-4 mt-3 border ${bgClass}`}>
+      <div className={`flex items-center gap-2 mb-1.5 ${accentClass}`}>
+        <Icon size={14} />
+        <span className="label-tag">Verdict</span>
       </div>
-      <p
-        className="text-[12px] font-medium leading-snug"
-        style={{ color: 'var(--text-1, #EDF0F7)' }}
-      >
+      <p className="text-sm font-medium leading-snug text-text-1">
         {verdict}
       </p>
     </div>

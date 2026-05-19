@@ -1,3 +1,12 @@
+---
+title: ProofyX
+emoji: 🛡️
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7861
+---
+
 # ProofyX
 
 AI-powered multimodal deepfake and media manipulation detection.

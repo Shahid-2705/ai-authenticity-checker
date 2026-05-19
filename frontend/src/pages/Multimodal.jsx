@@ -1,47 +1,44 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Layers, Zap, ShieldCheck } from 'lucide-react';
+import { Layers, Zap, ShieldCheck, X } from 'lucide-react';
+import { fadeUp, fadeIn } from '../utils/animations';
+import PageHeader from '../components/PageHeader';
+import ConfirmDialog from '../components/ConfirmDialog';
 import UploadZone from '../components/UploadZone';
 import RiskGauge from '../components/RiskGauge';
 import ScoreBar from '../components/ScoreBar';
 import VerdictCard from '../components/VerdictCard';
 import useForensicStore from '../store/useForensicStore';
 
-const fadeUp = {
-  hidden:  { opacity: 0, y: 14 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] } },
-};
-
 export default function Multimodal() {
   const [image, setImage] = useState(null);
   const [video, setVideo] = useState(null);
   const [audio, setAudio] = useState(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
-  const { multimodalAnalysis, runMultimodalAnalysis } = useForensicStore();
+  const { multimodalAnalysis, runMultimodalAnalysis, clearAnalysis } = useForensicStore();
   const { isAnalyzing, results, error } = multimodalAnalysis;
 
+  const hasInput = image || video || audio;
+
   const handleAnalyze = () => {
-    if (!image && !video && !audio) return;
-    runMultimodalAnalysis(image, video, audio);
+    if (hasInput) runMultimodalAnalysis(image, video, audio);
   };
+
+  const handleCancelConfirm = useCallback(() => {
+    const { cancelAnalysis } = useForensicStore.getState();
+    cancelAnalysis('multimodal');
+    clearAnalysis('multimodal');
+    setConfirmCancel(false);
+  }, [clearAnalysis]);
 
   return (
     <motion.div initial="hidden" animate="visible" variants={fadeUp} className="space-y-6">
-      {/* Header */}
-      <header>
-        <div className="flex items-center gap-2.5 mb-1.5">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center"
-            style={{ background: 'var(--accent-dim)', border: '1px solid rgba(59,130,246,0.18)', boxShadow: '0 0 12px rgba(59,130,246,0.15)' }}
-          >
-            <Layers size={14} style={{ color: 'var(--accent)' }} />
-          </div>
-          <h1 className="font-display text-xl font-bold" style={{ color: 'var(--text-1)' }}>Multimodal Fusion</h1>
-        </div>
-        <p className="text-[12px]" style={{ color: 'var(--text-2)' }}>
-          Upload multiple facets of media for a comprehensively compiled risk score.
-        </p>
-      </header>
+      <PageHeader
+        icon={Layers}
+        title="Multimodal Fusion"
+        subtitle="Upload multiple media types for a cross-modal risk assessment."
+      />
 
       {/* 3-column upload grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -51,11 +48,11 @@ export default function Multimodal() {
       </div>
 
       {/* Analyze button */}
-      <div className="flex justify-center">
+      <div className="flex justify-center gap-2">
         <button
           onClick={handleAnalyze}
-          disabled={(!image && !video && !audio) || isAnalyzing}
-          className="btn-primary max-w-sm w-full py-3 text-[12px]"
+          disabled={!hasInput || isAnalyzing}
+          className="btn-primary max-w-sm w-full py-3"
         >
           {isAnalyzing ? (
             <>
@@ -63,17 +60,21 @@ export default function Multimodal() {
               Fusing Modalities...
             </>
           ) : (
-            <><Zap size={15} /> INITIATE MULTIMODAL FUSION</>
+            <><Zap size={15} /> Run Multimodal Analysis</>
           )}
         </button>
+        {isAnalyzing && (
+          <button onClick={() => setConfirmCancel(true)} className="btn-danger px-3" title="Cancel">
+            <X size={15} />
+          </button>
+        )}
       </div>
 
       {/* Error */}
       {error && (
         <div
           role="alert"
-          className="p-3 rounded-lg text-[12px] text-center"
-          style={{ background: 'rgba(251,113,133,0.08)', border: '1px solid rgba(251,113,133,0.20)', color: 'var(--risk-critical)' }}
+          className="p-3 rounded-lg text-sm text-center bg-risk-criticalDim text-risk-critical border border-[rgba(251,113,133,0.20)]"
         >
           {error}
         </div>
@@ -81,56 +82,71 @@ export default function Multimodal() {
 
       {/* Results */}
       {results && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="card">
-          <p className="text-[10px] font-bold uppercase tracking-widest mb-5 text-center" style={{ color: 'var(--text-3)' }}>
-            Fusion Intelligence Report
-          </p>
+        <motion.div variants={fadeIn} initial="hidden" animate="visible" className="card">
+          <p className="label-tag mb-5 text-center">Fusion Report</p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
             {/* Left: Gauge + Verdict */}
             <div className="flex flex-col items-center space-y-4">
               <RiskGauge
-                percentage={results.data?.risk_score || results.data?.risk_percent || results.risk_percentage || 0}
+                percentage={results.risk_percent || 0}
                 label="Aggregated Risk"
                 size={200}
               />
-
-              {results.risk_label && (
-                <div
-                  className="w-full text-center py-2 rounded-lg text-[11px] font-semibold tracking-wide"
-                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-dim)', color: 'var(--text-2)' }}
-                >
-                  {results.risk_label}
-                </div>
-              )}
-
               <div className="w-full">
-                <VerdictCard verdict={results.verdict || results.data?.verdict} />
+                <VerdictCard verdict={results.verdict} riskScore={results.risk_percent} />
               </div>
             </div>
 
             {/* Right: Modality contributions */}
-            <div
-              className="p-5 rounded-lg space-y-4"
-              style={{ background: 'var(--bg-inset)', border: '1px solid var(--border-dim)' }}
-            >
-              <h4 className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-3)' }}>
-                Modality Contributions
-              </h4>
+            <div className="inset-panel p-5 space-y-4">
+              <h4 className="label-tag">Modality Contributions</h4>
 
-              {results.data?.modality_scores && Object.entries(results.data.modality_scores).map(([name, score]) => (
-                <ScoreBar key={name} name={name.toUpperCase()} score={score} />
+              {results.modality_scores && Object.entries(results.modality_scores).map(([name, score]) => (
+                score != null && <ScoreBar key={name} name={name.toUpperCase()} score={score} />
               ))}
 
-              <div className="pt-4" style={{ borderTop: '1px solid var(--border-dim)' }}>
-                <p className="text-[10px] font-mono whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--text-2)' }}>
-                  {results.data?.explanation || JSON.stringify(results.data, null, 2)}
-                </p>
-              </div>
+              {results.fusion_weights && (
+                <div className="pt-3 border-t border-border-dim">
+                  <p className="label-tag mb-2">Fusion Weights</p>
+                  <div className="flex gap-3">
+                    {Object.entries(results.fusion_weights).map(([mod, w]) => (
+                      <span key={mod} className="text-xs font-mono text-text-2">
+                        {mod}: {(w * 100).toFixed(0)}%
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {results.explanation && (
+                <div className="pt-3 border-t border-border-dim">
+                  <p className="text-sm leading-relaxed text-text-2">
+                    {results.explanation}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </motion.div>
       )}
+
+      {/* Empty state */}
+      {!results && !error && !isAnalyzing && (
+        <div className="flex flex-col items-center py-12 text-text-3">
+          <ShieldCheck size={24} className="opacity-30 mb-2" />
+          <p className="text-sm">Upload at least one media file to begin analysis</p>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmCancel}
+        title="Cancel Analysis"
+        message="Multimodal fusion is still running. Are you sure you want to cancel?"
+        confirmLabel="Cancel Analysis"
+        onConfirm={handleCancelConfirm}
+        onCancel={() => setConfirmCancel(false)}
+      />
     </motion.div>
   );
 }

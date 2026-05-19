@@ -7,42 +7,37 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Neon Obsidian palette — Cybersecurity Blue
+        // Single source of truth: CSS custom properties in index.css :root
         bg: {
-          void:     '#080A0F',
-          base:     '#0C0F16',
-          card:     '#141820',
-          elevated: '#1C2130',
-          inset:    '#0A0C12',
+          void:     'var(--bg-void)',
+          base:     'var(--bg-base)',
+          card:     'var(--bg-card)',
+          elevated: 'var(--bg-elevated)',
+          inset:    'var(--bg-inset)',
         },
         border: {
-          dim:  'rgba(255,255,255,0.07)',
-          mid:  'rgba(255,255,255,0.12)',
+          dim:  'var(--border-dim)',
+          mid:  'var(--border-mid)',
+          glow: 'var(--border-glow)',
         },
         accent: {
-          DEFAULT: '#3B82F6',
-          dim:     'rgba(59,130,246,0.12)',
-          glow:    'rgba(59,130,246,0.18)',
-          2:       '#06B6D4',
+          DEFAULT: 'var(--accent)',
+          dim:     'var(--accent-dim)',
+          glow:    'var(--accent-glow)',
+          2:       'var(--accent-2)',
         },
         text: {
-          1: '#EDF0F7',
-          2: '#8B95A5',
-          3: '#4A5264',
+          1: 'var(--text-1)',
+          2: 'var(--text-2)',
+          3: 'var(--text-3)',
         },
         risk: {
-          clear:    '#34D399',
-          caution:  '#FBBF24',
-          critical: '#FB7185',
+          clear:       'var(--risk-clear)',
+          caution:     'var(--risk-caution)',
+          critical:    'var(--risk-critical)',
           clearDim:    'rgba(52,211,153,0.10)',
           cautionDim:  'rgba(251,191,36,0.10)',
           criticalDim: 'rgba(251,113,133,0.10)',
-        },
-        // Compatibility aliases
-        ink: {
-          primary: '#EDF0F7',
-          body:    '#8B95A5',
-          muted:   '#4A5264',
         },
       },
       boxShadow: {
@@ -64,24 +59,14 @@ export default {
         DEFAULT: '10px',
       },
       animation: {
-        'fade-in':    'fadeIn 0.35s ease-out',
-        'slide-up':   'slideUp 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
-        'shimmer':    'shimmer 2s linear infinite',
-        'pulse-glow': 'pulseGlow 3s ease-in-out infinite',
-        'float':      'float 6s ease-in-out infinite',
+        'fade-in':  'fadeIn 0.35s ease-out',
+        'slide-up': 'slideUp 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
+        'shimmer':  'shimmer 2s linear infinite',
       },
       keyframes: {
-        fadeIn:    { '0%': { opacity: 0 }, '100%': { opacity: 1 } },
-        slideUp:   { '0%': { opacity: 0, transform: 'translateY(12px)' }, '100%': { opacity: 1, transform: 'translateY(0)' } },
-        shimmer:   { '0%': { backgroundPosition: '-200% 0' }, '100%': { backgroundPosition: '200% 0' } },
-        pulseGlow: {
-          '0%, 100%': { boxShadow: '0 0 8px rgba(59,130,246,0.20)' },
-          '50%':      { boxShadow: '0 0 24px rgba(59,130,246,0.40)' },
-        },
-        float: {
-          '0%, 100%': { transform: 'translateY(0)' },
-          '50%':      { transform: 'translateY(-6px)' },
-        },
+        fadeIn:  { '0%': { opacity: 0 }, '100%': { opacity: 1 } },
+        slideUp: { '0%': { opacity: 0, transform: 'translateY(12px)' }, '100%': { opacity: 1, transform: 'translateY(0)' } },
+        shimmer: { '0%': { backgroundPosition: '-200% 0' }, '100%': { backgroundPosition: '200% 0' } },
       },
     },
   },

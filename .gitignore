@@ -50,5 +50,6 @@ proofyx_history.db
 # Windows artifact
 nul
 
-# Test images
+# Test fixtures in root
 test_image.jpg
+dummy.mp4

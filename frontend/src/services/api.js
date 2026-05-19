@@ -49,43 +49,46 @@ export const forensicApi = {
     return response.data;
   },
 
-  analyzeImage: async (file, mode = 'ensemble') => {
+  analyzeImage: async (file, mode = 'ensemble', { signal } = {}) => {
     const formData = new FormData();
     formData.append('file', file);
     const modeParam = mode.toLowerCase().includes('fast') ? 'fast' : 'ensemble';
     const response = await api.post(`/api/v1/analyze/image?mode=${modeParam}`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      signal,
     });
     return response.data;
   },
 
-  analyzeVideo: async (file, fps = 4, aggregation = 'weighted_avg') => {
+  analyzeVideo: async (file, fps = 4, aggregation = 'weighted_avg', { signal } = {}) => {
     const formData = new FormData();
     formData.append('file', file);
     const response = await api.post(
       `/api/v1/analyze/video?fps=${fps}&aggregation=${aggregation}`,
       formData,
-      { headers: { 'Content-Type': 'multipart/form-data' } },
+      { headers: { 'Content-Type': 'multipart/form-data' }, signal },
     );
     return response.data;
   },
 
-  analyzeAudio: async (file) => {
+  analyzeAudio: async (file, { signal } = {}) => {
     const formData = new FormData();
     formData.append('file', file);
     const response = await api.post('/api/v1/analyze/audio', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      signal,
     });
     return response.data;
   },
 
-  analyzeMultimodal: async (image, video, audio) => {
+  analyzeMultimodal: async (image, video, audio, { signal } = {}) => {
     const formData = new FormData();
     if (image) formData.append('image', image);
     if (video) formData.append('video', video);
     if (audio) formData.append('audio', audio);
     const response = await api.post('/api/v1/analyze/multimodal', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      signal,
     });
     return response.data;
   },
