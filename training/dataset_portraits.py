@@ -37,15 +37,9 @@ from datasets import load_dataset
 # -------- HuggingFace dataset sources --------
 # Each entry: (dataset_id, split, image_col, label_col, fake_label_value)
 PORTRAIT_SOURCES = [
-    # Deepfake vs real faces (GAN + diffusion)
-    {
-        "id": "JamieWithofs/Deepfake-and-real-images",
-        "split": "train",
-        "image_col": "image",
-        "label_col": "label",
-        "fake_value": 0,  # 0=Fake, 1=Real
-        "real_value": 1,
-    },
+    # NOTE: JamieWithofs/Deepfake-and-real-images was removed — it returned
+    # 0 fake samples out of 20,000+ scanned (streaming shuffle never surfaced
+    # any), indicating a broken/unreliable label distribution in this source.
     # AI-Generated vs Real (diverse AI methods)
     {
         "id": "Hemg/AI-Generated-vs-Real-Images-Datasets",
