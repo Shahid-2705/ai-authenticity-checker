@@ -222,14 +222,13 @@ class PortraitDataset(Dataset):
         self.fft_augment = fft_augment and fft_mode
 
         if self.fft_augment:
+            # No blur/resize-crop/rotation here: those are low-pass and
+            # scale/geometry distortions that corrupt the high-frequency
+            # spectral signature the FrequencyCNN is trained to classify.
+            # Horizontal flip preserves the FFT magnitude spectrum's
+            # structure (mirrors symmetrically) so it's safe to keep.
             self.pre_fft_transform = transforms.Compose([
                 transforms.RandomHorizontalFlip(),
-                transforms.RandomRotation(5),
-                transforms.RandomResizedCrop(256, scale=(0.85, 1.0)),
-                transforms.RandomApply([
-                    transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0))
-                ], p=0.2),
-                transforms.ColorJitter(brightness=0.1, contrast=0.1),
             ])
 
     def __len__(self):

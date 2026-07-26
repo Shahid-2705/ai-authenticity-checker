@@ -172,27 +172,37 @@ def generate_system_header(
 # Detection Modules Panel
 # ──────────────────────────────────────────────
 
+# Maps the registry keys used in core/pipeline.py's `self.loaded` list
+# to the display names shown in the sidebar panel.
+_MODEL_KEY_TO_DISPLAY_NAME = {
+    "vit": "ViT Deepfake",
+    "texture": "EfficientNet-B4 Texture",
+    "frequency": "Frequency CNN",
+    "face": "Face Deepfake",
+    "dino": "DINOv2",
+    "efficientnet": "EfficientNet Auth",
+    "fusion": "Fusion MLP",
+    "corefakenet": "CorefakeNet",
+    "audio": "Audio CNN",
+}
+
+
 def generate_modules_panel(
     loaded_models: list[str],
     all_model_names: Optional[list[str]] = None,
 ) -> str:
     """Show loaded model status with green/gray indicators."""
     if all_model_names is None:
-        all_model_names = [
-            "ViT Deepfake", "EfficientNet-B4 Texture", "Frequency CNN",
-            "Face Deepfake", "DINOv2", "EfficientNet Auth",
-            "Fusion MLP", "CorefakeNet", "Audio CNN",
-        ]
+        all_model_names = list(_MODEL_KEY_TO_DISPLAY_NAME.values())
 
-    loaded_lower = [m.lower() for m in loaded_models]
+    active_names = {
+        _MODEL_KEY_TO_DISPLAY_NAME[m.lower()]
+        for m in loaded_models
+        if m.lower() in _MODEL_KEY_TO_DISPLAY_NAME
+    }
     items = ""
     for name in all_model_names:
-        is_active = any(
-            keyword in name.lower()
-            for loaded_name in loaded_lower
-            for keyword in loaded_name.split()
-            if len(keyword) > 3
-        ) or name.lower().replace(" ", "") in "".join(loaded_lower).replace(" ", "")
+        is_active = name in active_names
 
         dot_class = "module-dot-active" if is_active else "module-dot-inactive"
         status_text = "Active" if is_active else "Inactive"
