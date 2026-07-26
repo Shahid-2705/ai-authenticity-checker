@@ -19,14 +19,12 @@ from io import BytesIO
 from typing import Optional
 import re
 
-from utils.explainability import explain_risk, explain_audio_risk, explain_multimodal
+from utils.explainability import explain_risk, explain_multimodal
 from utils.gradcam import (
     generate_gradcam_image, get_gradcam_for_face_model,
-    get_gradcam_for_vit, get_gradcam_for_efficientnet,
-    create_heatmap_overlay, create_face_region_overlay,
-    detect_and_align_face, merge_heatmaps, _preprocess,
+    get_gradcam_for_vit, create_heatmap_overlay, create_face_region_overlay,
+    detect_and_align_face, _preprocess,
 )
-from pipeline.face_gate import face_present
 from pipeline.video_analyzer import (
     VideoAnalyzer, extract_frames, get_video_info, FrequencyAnalyzer,
 )
@@ -38,7 +36,7 @@ from core_models.face_deepfake_model import FaceDeepfakeModel
 from core_models.efficientnet_texture import EfficientNetTexture
 from core_models.frequency_cnn import FrequencyCNN, fft_to_tensor
 from core_models.fusion_mlp import FusionMLP
-from core_models.corefakenet import CorefakeNet, FastVideoProcessor
+from core_models.corefakenet import CorefakeNet
 
 from transformers import ViTForImageClassification, ViTImageProcessor
 
@@ -395,12 +393,12 @@ def analyze_image(image):
         if vit_model is not None:
             details_lines.append(f"ViT Deepfake       : {vit_prob:.4f}")
         else:
-            details_lines.append(f"ViT Deepfake       : N/A (not loaded)")
+            details_lines.append("ViT Deepfake       : N/A (not loaded)")
 
         if texture_model is not None:
             details_lines.append(f"EfficientNet-B4 Tex: {texture_prob:.4f}")
         else:
-            details_lines.append(f"EfficientNet-B4 Tex: N/A (not trained)")
+            details_lines.append("EfficientNet-B4 Tex: N/A (not trained)")
 
         details_lines.append(f"Forensic (heuristic): {forensic_prob:.4f}")
 
@@ -477,8 +475,8 @@ def analyze_image_fast(image):
     details_lines = []
     details_lines.append(f"Face Detected      : {'Yes' if has_face else 'No'}")
     details_lines.append(f"Face-Aligned Input : {'Yes' if has_face else 'No (full frame)'}")
-    details_lines.append(f"Analysis Mode      : CorefakeNet (Fast)")
-    details_lines.append(f"Fusion Mode        : attention-weighted (5 heads)")
+    details_lines.append("Analysis Mode      : CorefakeNet (Fast)")
+    details_lines.append("Fusion Mode        : attention-weighted (5 heads)")
     details_lines.append("")
     details_lines.append("--- CorefakeNet Head Scores ---")
     for name in CorefakeNet.HEAD_NAMES:
@@ -606,7 +604,7 @@ def _generate_gradcam_video(video_path, fps):
     import imageio
 
     try:
-        import imageio_ffmpeg
+        import imageio_ffmpeg  # noqa: F401
     except ImportError:
         print("WARNING: imageio[ffmpeg] not available. GradCAM video generation may fail.")
 
@@ -706,7 +704,7 @@ def _generate_gradcam_video(video_path, fps):
         print(f"GradCAM Video generated | FPS: {out_fps} | Frames: {frame_count} | Output: {tmp_out.name}")
         return tmp_out.name
 
-    except Exception as e:
+    except Exception:
         import traceback
         traceback.print_exc()
         if os.path.exists(tmp_out.name):
@@ -923,26 +921,26 @@ async def analyze_image_api(
         # Read and convert image
         contents = await file.read()
         image = Image.open(BytesIO(contents)).convert("RGB")
-        
+
         # Call existing analysis function
         risk_label, details, verdict, gradcam_img = analyze_image_routed(image, mode)
-        
+
         # Parse risk percentage
         try:
             risk_pct = float(risk_label.split(":")[1].strip().replace("%", ""))
         except (IndexError, ValueError):
             risk_pct = 0.0
-        
+
         # Convert gradcam to base64 for frontend
         gradcam_base64 = None
         if gradcam_img is not None:
             buffered = BytesIO()
             gradcam_img.save(buffered, format="PNG")
             gradcam_base64 = base64.b64encode(buffered.getvalue()).decode()
-        
+
         # Parse model scores from details
         scores = parse_model_scores(details)
-        
+
         return JSONResponse({
             "success": True,
             "risk_percentage": risk_pct,
@@ -972,7 +970,7 @@ async def analyze_video_api(
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
             tmp.write(await file.read())
             tmp_path = tmp.name
-        
+
         missing_advanced = (face_model is None and eff_model is None and dino_model is None)
         mode = "ensemble"
         message = ""
@@ -985,27 +983,27 @@ async def analyze_video_api(
                 from core_models.corefakenet import FastVideoProcessor
                 fast_vp = FastVideoProcessor(corefakenet_path, device=str(device))
                 result = fast_vp.analyze(tmp_path, sampling_fps=fps, progress_callback=None)
-                
+
                 os.unlink(tmp_path)
-                
+
                 if "error" in result:
                     return JSONResponse({
                         "success": False,
                         "error": result["error"]
                     }, status_code=200)
-                
+
                 risk_pct = result["final_risk"] * 100
                 conf_pct = result["confidence"] * 100
                 risk_label = f"Verdict: {result['prediction']} | AI Risk: {risk_pct:.1f}% | Confidence: {conf_pct:.1f}%"
-                
+
                 details_lines = [
-                    f"Used CorefakeNet Fast Mode (fallback due to missing models).",
+                    "Used CorefakeNet Fast Mode (fallback due to missing models).",
                     f"Elapsed: {result['elapsed_seconds']}s",
                     "--- Model Scores ---"
                 ]
                 for key, val in result.get('model_scores', {}).items():
                     details_lines.append(f"{key}: {val:.4f}")
-                
+
                 return JSONResponse({
                     "success": True,
                     "mode": mode,
@@ -1022,17 +1020,17 @@ async def analyze_video_api(
             else:
                 mode = "fallback"
                 message = "Limited analysis (only ViT available)"
-        
+
         # Call existing video analysis (Ensemble / Fallback to ViT)
         risk_label, details, frame_details, gradcam_video_path = analyze_video_ui(
             tmp_path, fps, aggregation, progress=None
         )
-        
+
         # Parse risk percentage
         import re
         match = re.search(r'Risk:\s*([\d.]+)%', risk_label)
         risk_pct = float(match.group(1)) if match else 50.0
-        
+
         # Convert gradcam video to base64 if exists
         gradcam_base64 = None
         if gradcam_video_path and os.path.exists(gradcam_video_path):
@@ -1040,11 +1038,11 @@ async def analyze_video_api(
                 import base64
                 gradcam_base64 = base64.b64encode(f.read()).decode()
             os.unlink(gradcam_video_path)
-        
+
         # Cleanup
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
-        
+
         return JSONResponse({
             "success": True,
             "mode": mode,
@@ -1078,18 +1076,18 @@ async def analyze_audio_api(
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(await file.read())
             tmp_path = tmp.name
-        
+
         # Call existing audio analysis
         risk_label, details, verdict = analyze_audio_ui(tmp_path, progress=None)
-        
+
         # Parse authenticity
         match = re.search(r'Authenticity:\s*([\d.]+)%', risk_label)
         auth_pct = float(match.group(1)) if match else 50.0
         risk_pct = 100 - auth_pct
-        
+
         # Cleanup
         os.unlink(tmp_path)
-        
+
         return JSONResponse({
             "success": True,
             "risk_percentage": risk_pct,
@@ -1118,35 +1116,35 @@ async def analyze_multimodal_api(
         if image:
             contents = await image.read()
             image_pil = Image.open(BytesIO(contents)).convert("RGB")
-        
+
         # Process video if provided
         video_path = None
         if video:
             with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
                 tmp.write(await video.read())
                 video_path = tmp.name
-        
+
         # Process audio if provided
         audio_path = None
         if audio:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                 tmp.write(await audio.read())
                 audio_path = tmp.name
-        
+
         # Call existing multimodal analysis
         risk_label, output_json, verdict = analyze_multimodal(
             image_pil, video_path, audio_path, progress=None
         )
-        
+
         # Parse result
         data = json.loads(output_json)
-        
+
         # Cleanup temp files
         if video_path and os.path.exists(video_path):
             os.unlink(video_path)
         if audio_path and os.path.exists(audio_path):
             os.unlink(audio_path)
-        
+
         return JSONResponse({
             "success": True,
             "data": data,
@@ -1170,15 +1168,15 @@ if os.path.exists(REACT_BUILD_PATH):
 # ========== MAIN - Choose between Gradio and FastAPI+React ==========
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="ProofyX Deepfake Detection")
     parser.add_argument("--ui", choices=["gradio", "react"], default="gradio",
                        help="Choose UI framework (gradio or react)")
     parser.add_argument("--port", type=int, default=7861,
                        help="Port to run the server on")
-    
+
     args = parser.parse_args()
-    
+
     if args.ui == "react":
         # Run FastAPI with React frontend
         import uvicorn
@@ -1188,7 +1186,7 @@ if __name__ == "__main__":
     else:
         # Run original Gradio UI
         LOGO_PATH = os.path.join(ROOT_DIR, "assets", "logo.jpeg")
-        
+
         # Force dark mode JS injected at launch
         FORCE_DARK_JS = """
         () => {
@@ -1197,7 +1195,7 @@ if __name__ == "__main__":
             document.body.style.backgroundColor = '#0A0E1A';
         }
         """
-        
+
         CUSTOM_CSS = """
         /* ===== CSS Variables ===== */
         :root {
@@ -1221,7 +1219,7 @@ if __name__ == "__main__":
             --glow-cyan: 0 0 20px rgba(0,240,255,0.15);
             --glow-violet: 0 0 20px rgba(168,85,247,0.15);
         }
-        
+
         body, .gradio-container, .dark {
             background-color: var(--bg-primary) !important;
             color: var(--text-primary) !important;
@@ -1231,9 +1229,9 @@ if __name__ == "__main__":
             margin: auto;
             font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
         }
-        
+
         footer { display: none !important; }
-        
+
         .tab-nav {
             background: rgba(255,255,255,0.02) !important;
             border-radius: 12px !important;
@@ -1251,7 +1249,7 @@ if __name__ == "__main__":
             background: linear-gradient(135deg, var(--accent-cyan), var(--accent-violet)) !important;
             color: #fff !important;
         }
-        
+
         .analyze-btn, button.primary {
             background: linear-gradient(135deg, var(--accent-cyan), var(--accent-violet)) !important;
             color: #fff !important;
@@ -1259,7 +1257,7 @@ if __name__ == "__main__":
             padding: 12px 28px !important;
             font-weight: 700 !important;
         }
-        
+
         .proofyx-header {
             display: flex;
             align-items: center;
@@ -1274,7 +1272,7 @@ if __name__ == "__main__":
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
-        
+
         .status-badge {
             display: inline-flex;
             align-items: center;
@@ -1292,25 +1290,25 @@ if __name__ == "__main__":
             background: var(--accent-green);
             animation: pulse-glow 2s infinite;
         }
-        
+
         @keyframes pulse-glow {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
         """
-        
+
         def get_status_html():
             models_str = ", ".join(loaded_models) if loaded_models else "None"
             count = len(loaded_models)
             fast_mode = " | Fast Mode ready" if corefakenet_model is not None else ""
             return f'<div class="status-badge"><span class="status-dot"></span>{count} models active: {models_str}{fast_mode}</div>'
-        
+
         def generate_gauge_html(risk_pct, label="Risk Score"):
             risk_pct = max(0, min(100, risk_pct))
             radius = 80
             circumference = 2 * 3.14159 * radius
             offset = circumference * (1 - risk_pct / 100)
-            
+
             if risk_pct > 70:
                 color = "#EC4899"
                 glow = "rgba(236,72,153,0.4)"
@@ -1320,7 +1318,7 @@ if __name__ == "__main__":
             else:
                 color = "#10B981"
                 glow = "rgba(16,185,129,0.4)"
-            
+
             return f"""
             <div style="display:flex;flex-direction:column;align-items:center;padding:20px 0;">
                 <svg width="200" height="200" viewBox="0 0 200 200">
@@ -1344,11 +1342,11 @@ if __name__ == "__main__":
                 </svg>
             </div>
             """
-        
+
         def generate_score_bars_html(scores_dict):
             if not scores_dict:
                 return '<div style="color:#64748B;text-align:center;padding:16px;">No scores available</div>'
-            
+
             bars_html = ""
             for name, value in scores_dict.items():
                 pct = max(0, min(100, value * 100))
@@ -1361,7 +1359,7 @@ if __name__ == "__main__":
                 else:
                     color = "#10B981"
                     glow = "rgba(16,185,129,0.3)"
-                
+
                 bars_html += f"""
                 <div style="margin-bottom:10px;">
                     <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
@@ -1375,7 +1373,7 @@ if __name__ == "__main__":
                 </div>
                 """
             return f'<div style="padding:12px 0;">{bars_html}</div>'
-        
+
         def generate_verdict_html(verdict_str):
             if not verdict_str:
                 return ""
@@ -1395,7 +1393,7 @@ if __name__ == "__main__":
                 border = "rgba(16,185,129,0.3)"
                 color = "#10B981"
                 icon = "&#10003;"
-            
+
             return f"""
             <div style="padding:14px 18px;border-radius:12px;background:{bg};border:1px solid {border};margin-top:8px;">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
@@ -1405,71 +1403,71 @@ if __name__ == "__main__":
                 <div style="color:#CBD5E1;font-size:0.82rem;line-height:1.5;">{verdict_str}</div>
             </div>
             """
-        
+
         def analyze_image_ui_wrapper(image, mode):
             if image is None:
                 empty = '<div style="color:#64748B;text-align:center;padding:24px;">Upload an image to analyze</div>'
                 return empty, empty, "", "", None, None
-            
+
             risk_label, details, verdict, gradcam_img = analyze_image_routed(image, mode)
-            
+
             try:
                 risk_pct = float(risk_label.split(":")[1].strip().replace("%", ""))
             except (IndexError, ValueError):
                 risk_pct = 0.0
-            
+
             gauge_html = generate_gauge_html(risk_pct, "AI Risk")
             scores = parse_model_scores(details)
             scores_html = generate_score_bars_html(scores)
             verdict_html = generate_verdict_html(verdict)
-            
+
             return gauge_html, scores_html, verdict_html, details, gradcam_img, image
-        
+
         def analyze_video_ui_wrapper(video, fps, aggregation, progress=gr.Progress()):
             if video is None:
                 empty = '<div style="color:#64748B;text-align:center;padding:24px;">Upload a video to analyze</div>'
                 return empty, empty, "", "", None
-            
+
             risk_label, details, frame_details, gradcam_video = analyze_video_ui(video, fps, aggregation, progress)
-            
+
             match = re.search(r'Risk:\s*([\d.]+)%', risk_label)
             risk_pct = float(match.group(1)) if match else 50.0
-            
+
             gauge_html = generate_gauge_html(risk_pct, "Video Risk")
             summary_html = f'<div style="padding:12px 0;"><div style="color:#94A3B8;font-size:0.82rem;white-space:pre-wrap;">{risk_label}</div></div>'
             verdict_html = generate_verdict_html("HIGH RISK" if risk_pct > 70 else "MEDIUM RISK" if risk_pct > 40 else "LOW RISK")
-            
+
             return gauge_html, summary_html, verdict_html, f"{details}\n\n{frame_details}", gradcam_video
-        
+
         def analyze_audio_ui_wrapper(audio, progress=gr.Progress()):
             if audio is None:
                 empty = '<div style="color:#64748B;text-align:center;padding:24px;">Upload audio to analyze</div>'
                 return empty, empty, ""
-            
+
             risk_label, details, verdict = analyze_audio_ui(audio, progress)
-            
+
             match = re.search(r'Authenticity:\s*([\d.]+)%', risk_label)
             auth_pct = float(match.group(1)) if match else 50.0
             risk_pct = 100 - auth_pct
-            
+
             gauge_html = generate_gauge_html(risk_pct, "Audio Risk")
             details_html = f'<div style="padding:12px 0;color:#CBD5E1;font-size:0.82rem;white-space:pre-wrap;">{details}</div>'
             verdict_html = generate_verdict_html(verdict)
-            
+
             return gauge_html, details_html, verdict_html
-        
+
         def analyze_multimodal_wrapper(image, video, audio, progress=gr.Progress()):
             if image is None and video is None and audio is None:
                 empty = '<div style="color:#64748B;text-align:center;padding:24px;">Upload media to analyze</div>'
                 return empty, empty, "", ""
-            
+
             risk_label, output_json, verdict = analyze_multimodal(image, video, audio, progress)
-            
+
             match = re.search(r'Risk:\s*([\d.]+)%', risk_label)
             risk_pct = float(match.group(1)) if match else 50.0
-            
+
             gauge_html = generate_gauge_html(risk_pct, "Fused Risk")
-            
+
             try:
                 data = json.loads(output_json)
                 mod_scores = data.get("modality_scores", {})
@@ -1477,11 +1475,11 @@ if __name__ == "__main__":
                 bars_html = generate_score_bars_html(bars)
             except (json.JSONDecodeError, AttributeError):
                 bars_html = '<div style="color:#64748B;">No modality data</div>'
-            
+
             verdict_html = generate_verdict_html(verdict)
-            
+
             return gauge_html, bars_html, verdict_html, output_json
-        
+
         proofyx_theme = gr.themes.Base(
             primary_hue=gr.themes.Color(
                 c50="#ecfeff", c100="#cffafe", c200="#a5f3fc", c300="#67e8f9",
@@ -1521,9 +1519,9 @@ if __name__ == "__main__":
             body_text_color_subdued="#94A3B8",
             body_text_color_subdued_dark="#94A3B8",
         )
-        
+
         with gr.Blocks(title="ProofyX") as demo:
-            gr.HTML(f"""
+            gr.HTML("""
             <div class="proofyx-header">
                 <img src="file/assets/logo.jpeg" alt="ProofyX Logo" style="width:64px;height:64px;border-radius:14px;" />
                 <div>
@@ -1533,7 +1531,7 @@ if __name__ == "__main__":
             </div>
             """)
             gr.HTML(get_status_html())
-            
+
             with gr.Tabs():
                 with gr.TabItem("Image"):
                     with gr.Row():
@@ -1545,29 +1543,29 @@ if __name__ == "__main__":
                                 label="Analysis Mode"
                             )
                             analyze_btn = gr.Button("Analyze Image", variant="primary", size="lg")
-                        
+
                         with gr.Column(scale=2, elem_classes=["panel-center"]):
                             img_display = gr.Image(label="Preview", type="pil")
                             heatmap_toggle = gr.Checkbox(label="Show Artifact Heatmap", value=True)
-                        
+
                         with gr.Column(scale=1, elem_classes=["panel-right"]):
                             img_gauge = gr.HTML(value='<div style="text-align:center;padding:24px;">Awaiting analysis...</div>')
                             img_scores = gr.HTML()
                             img_verdict = gr.HTML()
                             with gr.Accordion("Raw Details", open=False):
                                 img_details = gr.Textbox(lines=12, interactive=False, show_label=False)
-                    
+
                     img_gradcam_state = gr.State(value=None)
                     img_original_state = gr.State(value=None)
-                    
+
                     def _run_image(image, mode):
                         return analyze_image_ui_wrapper(image, mode)
-                    
+
                     def _toggle_heatmap(show_heatmap, gradcam_img, original_img):
                         if show_heatmap and gradcam_img is not None:
                             return gradcam_img
                         return original_img
-                    
+
                     analyze_btn.click(
                         fn=_run_image,
                         inputs=[input_image, analysis_mode],
@@ -1577,7 +1575,7 @@ if __name__ == "__main__":
                         inputs=[heatmap_toggle, img_gradcam_state, img_original_state],
                         outputs=[img_display],
                     )
-                    
+
                     input_image.change(
                         fn=_run_image,
                         inputs=[input_image, analysis_mode],
@@ -1587,13 +1585,13 @@ if __name__ == "__main__":
                         inputs=[heatmap_toggle, img_gradcam_state, img_original_state],
                         outputs=[img_display],
                     )
-                    
+
                     heatmap_toggle.change(
                         fn=_toggle_heatmap,
                         inputs=[heatmap_toggle, img_gradcam_state, img_original_state],
                         outputs=[img_display],
                     )
-                
+
                 with gr.TabItem("Video"):
                     with gr.Row():
                         with gr.Column(scale=1):
@@ -1601,43 +1599,43 @@ if __name__ == "__main__":
                             fps_slider = gr.Slider(minimum=0.5, maximum=10, value=6, step=0.5, label="Sampling FPS")
                             agg_method = gr.Dropdown(choices=["weighted_avg", "majority", "average", "max"], value="weighted_avg", label="Aggregation")
                             video_btn = gr.Button("Analyze Video", variant="primary", size="lg")
-                        
+
                         with gr.Column(scale=2):
                             gradcam_video_output = gr.Video(label="GradCAM Detection Output")
-                        
+
                         with gr.Column(scale=1):
                             vid_gauge = gr.HTML(value='<div style="text-align:center;padding:24px;">Awaiting analysis...</div>')
                             vid_summary = gr.HTML()
                             vid_verdict = gr.HTML()
                             with gr.Accordion("Frame Details", open=False):
                                 vid_frames = gr.Textbox(lines=15, interactive=False, show_label=False)
-                    
+
                     video_btn.click(
                         fn=analyze_video_ui_wrapper,
                         inputs=[input_video, fps_slider, agg_method],
                         outputs=[vid_gauge, vid_summary, vid_verdict, vid_frames, gradcam_video_output],
                     )
-                
+
                 with gr.TabItem("Audio"):
                     with gr.Row():
                         with gr.Column(scale=1):
                             input_audio = gr.Audio(type="filepath", label="Upload Audio")
                             audio_btn = gr.Button("Analyze Audio", variant="primary", size="lg")
-                        
+
                         with gr.Column(scale=2):
                             audio_center = gr.HTML(value='<div style="text-align:center;padding:60px 24px;">Upload an audio file and click Analyze</div>')
-                        
+
                         with gr.Column(scale=1):
                             aud_gauge = gr.HTML(value='<div style="text-align:center;padding:24px;">Awaiting analysis...</div>')
                             aud_details = gr.HTML()
                             aud_verdict = gr.HTML()
-                    
+
                     audio_btn.click(
                         fn=analyze_audio_ui_wrapper,
                         inputs=[input_audio],
                         outputs=[aud_gauge, aud_details, aud_verdict],
                     )
-                
+
                 with gr.TabItem("Multimodal"):
                     with gr.Row():
                         with gr.Column(scale=1):
@@ -1645,23 +1643,23 @@ if __name__ == "__main__":
                             mm_video = gr.Video(label="Video (optional)")
                             mm_audio = gr.Audio(type="filepath", label="Audio (optional)")
                             mm_btn = gr.Button("Analyze All", variant="primary", size="lg")
-                        
+
                         with gr.Column(scale=2):
                             mm_center = gr.HTML(value='<div style="text-align:center;padding:60px 24px;">Upload one or more media types for cross-modal fusion</div>')
-                        
+
                         with gr.Column(scale=1):
                             mm_gauge = gr.HTML(value='<div style="text-align:center;padding:24px;">Awaiting analysis...</div>')
                             mm_bars = gr.HTML()
                             mm_verdict_html = gr.HTML()
                             with gr.Accordion("Raw JSON", open=False):
                                 mm_json = gr.Textbox(lines=12, interactive=False, show_label=False)
-                    
+
                     mm_btn.click(
                         fn=analyze_multimodal_wrapper,
                         inputs=[mm_image, mm_video, mm_audio],
                         outputs=[mm_gauge, mm_bars, mm_verdict_html, mm_json],
                     )
-            
+
             gr.HTML("""
             <div class="proofyx-footer" style="text-align:center;padding:20px 0;color:#64748B;font-size:0.78rem;border-top:1px solid rgba(255,255,255,0.08);margin-top:20px;">
                 <span>&#9670;</span> Face-aligned input &bull; Multi-model Grad-CAM &bull;
@@ -1669,7 +1667,7 @@ if __name__ == "__main__":
                 &bull; <span>CorefakeNet</span> Fast Mode &bull; Audio CNN &bull; Multimodal Fusion
             </div>
             """)
-        
+
         demo.launch(
             server_name="127.0.0.1",
             server_port=args.port,

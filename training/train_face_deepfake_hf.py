@@ -18,8 +18,7 @@ from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torchvision import transforms
 from datasets import load_dataset
-from PIL import Image, ImageFilter
-import numpy as np
+from PIL import Image
 
 from core_models.face_deepfake_model import FaceDeepfakeModel
 

@@ -93,7 +93,6 @@ def explain_multimodal(modality_scores, final_score):
         else:
             parts.append(f"{mod}: low risk ({score}%)")
 
-    risk_pct = final_score * 100
     if final_score > 0.7:
         verdict = "Strong evidence of manipulation across modalities"
     elif final_score > 0.4:

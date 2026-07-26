@@ -345,7 +345,7 @@ def main():
     scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-6)
 
     # Training loop
-    print(f"\nStarting Audio Deepfake CNN training...\n")
+    print("\nStarting Audio Deepfake CNN training...\n")
     best_val_loss = float("inf")
     patience_counter = 0
 
@@ -412,7 +412,7 @@ def main():
                 print(f"\nEarly stopping at epoch {epoch+1}")
                 break
 
-    print(f"\nAudio Deepfake CNN training complete.")
+    print("\nAudio Deepfake CNN training complete.")
     print(f"Best model saved to: {MODEL_PATH}")
 
 

@@ -8,28 +8,21 @@ Uses gr.Sidebar for navigation, gr.HTML for custom components.
 from __future__ import annotations
 
 import os
-import re
 import uuid
-from typing import Any, Optional
 
 import gradio as gr
 
-from ui.theme import (
-    CUSTOM_CSS, FORCE_DARK_JS, STARS_JS,
-    CHARTJS_HEAD, RADAR_JS, TIMELINE_JS,
-    create_theme,
-)
 from ui.components import (
     generate_gauge_html, generate_score_bars_html, generate_verdict_html,
     generate_system_header, generate_modules_panel, generate_agreement_html,
-    generate_exif_html, generate_history_html, parse_model_scores,
+    generate_exif_html, generate_history_html,
 )
 from core.pipeline import (
     analyze_image, analyze_video, analyze_audio, analyze_multimodal,
     get_registry,
 )
-from core.metadata import extract_full_metadata, extract_exif
-from core.reports import build_forensic_report, generate_pdf_report, generate_html_report
+from core.metadata import extract_full_metadata
+from core.reports import build_forensic_report, generate_pdf_report
 from db.history import AnalysisHistory
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -70,7 +63,7 @@ def create_gradio_app() -> gr.Blocks:
             # ===== LEFT SIDEBAR =====
             with gr.Column(scale=0, min_width=220, elem_classes=["nav-sidebar"]):
                 if os.path.exists(LOGO_PATH):
-                    gr.HTML(f"""
+                    gr.HTML("""
                     <div style="text-align:center;padding:16px 0 8px 0;">
                         <img src="/assets/logo.jpeg" alt="ProofyX"
                              style="width:48px;height:48px;border-radius:12px;
@@ -363,7 +356,7 @@ def create_gradio_app() -> gr.Blocks:
                                     )
 
                                 with gr.Column(scale=2, elem_classes=["panel-center"]):
-                                    audio_center = gr.HTML(
+                                    gr.HTML(
                                         value='<div style="color:#64748B;text-align:center;padding:60px 24px;">'
                                               'Upload an audio file and click Initialize Scan<br>'
                                               '<span style="font-size:0.8rem;">Supported: WAV, MP3, FLAC, M4A, OGG, AAC, WMA</span></div>',
@@ -430,7 +423,7 @@ def create_gradio_app() -> gr.Blocks:
                                     )
 
                                 with gr.Column(scale=2, elem_classes=["panel-center"]):
-                                    mm_center = gr.HTML(
+                                    gr.HTML(
                                         value='<div style="color:#64748B;text-align:center;padding:60px 24px;">'
                                               'Upload one or more media types for cross-modal fusion analysis</div>',
                                     )
@@ -521,6 +514,7 @@ def create_gradio_app() -> gr.Blocks:
                         gr.update(visible=True),
                         gr.update(visible=False),
                         gr.update(visible=False),
+                        gr.update(),
                     )
 
                 def show_history():
@@ -529,6 +523,7 @@ def create_gradio_app() -> gr.Blocks:
                         gr.update(visible=False),
                         gr.update(visible=True),
                         gr.update(visible=False),
+                        html,
                     )
 
                 def show_settings():
@@ -536,9 +531,10 @@ def create_gradio_app() -> gr.Blocks:
                         gr.update(visible=False),
                         gr.update(visible=False),
                         gr.update(visible=True),
+                        gr.update(),
                     )
 
-                pages = [scan_page, history_page, settings_page]
+                pages = [scan_page, history_page, settings_page, history_html]
                 scan_nav.click(fn=show_scan, outputs=pages)
                 history_nav.click(fn=show_history, outputs=pages)
                 settings_nav.click(fn=show_settings, outputs=pages)

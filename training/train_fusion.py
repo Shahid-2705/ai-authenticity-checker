@@ -32,13 +32,12 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from torchvision import transforms
 
 from core_models.fusion_mlp import FusionMLP
 from core_models.efficientnet_texture import EfficientNetTexture
 from core_models.frequency_cnn import FrequencyCNN, fft_to_tensor
 from training.dataset_portraits import (
-    load_portrait_dataset, PortraitDataset, VAL_TRANSFORM,
+    load_portrait_dataset, VAL_TRANSFORM,
 )
 
 # -------- CONFIG --------
@@ -198,7 +197,7 @@ def train_fusion(scores, labels, device):
         scores: (N, 4) per-model scores
         labels: (N,) ground truth (0=real, 1=fake)
     """
-    print(f"\n--- Training Fusion MLP ---\n")
+    print("\n--- Training Fusion MLP ---\n")
 
     # Train/val split
     n = len(scores)

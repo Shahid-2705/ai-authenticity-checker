@@ -7,7 +7,6 @@ No Gradio or framework dependencies — just HTML/CSS/SVG.
 
 from __future__ import annotations
 
-import json
 from typing import Any, Optional
 
 

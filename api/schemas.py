@@ -7,7 +7,6 @@ All responses follow the envelope pattern:
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field

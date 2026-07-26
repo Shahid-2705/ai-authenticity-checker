@@ -82,7 +82,7 @@ def report_model_size(model_path=MODEL_PATH):
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    print(f"Audio Deepfake CNN:")
+    print("Audio Deepfake CNN:")
     print(f"  Total parameters    : {total_params:,}")
     print(f"  Trainable parameters: {trainable_params:,}")
 

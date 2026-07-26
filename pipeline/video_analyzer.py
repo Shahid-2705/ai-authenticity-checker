@@ -20,9 +20,7 @@ from io import BytesIO
 from torchvision import transforms
 from collections import deque
 
-from pipeline.face_gate import face_present
-from core_models.frequency_cnn import FrequencyCNN, fft_to_tensor
-from core_models.fusion_mlp import FusionMLP
+from core_models.frequency_cnn import fft_to_tensor
 
 
 # -------- Shared transform --------
@@ -266,7 +264,6 @@ class FrequencyAnalyzer:
         AI images tend to have LESS high-frequency content.
         Lower ratio → more likely AI → higher score.
         """
-        total_energy = magnitude.sum() + 1e-8
         h, w = magnitude.shape
 
         # Create radial distance map

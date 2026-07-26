@@ -14,9 +14,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from core.types import AnalysisResult
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "proofyx_history.db"
+
+
+def _json_default(obj: Any) -> Any:
+    """Coerce numpy scalars (e.g. float32 model outputs) to native Python types."""
+    if hasattr(obj, "item"):
+        return obj.item()
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS analyses (
@@ -114,7 +120,7 @@ class AnalysisHistory:
                     result.get("verdict", ""),
                     result.get("confidence", ""),
                     result.get("risk_level", ""),
-                    json.dumps(result.get("model_scores", {})),
+                    json.dumps(result.get("model_scores", {}), default=_json_default),
                     result.get("model_agreement", ""),
                     result.get("fusion_mode", ""),
                     result.get("models_used", 0),
@@ -123,7 +129,7 @@ class AnalysisHistory:
                     result.get("processing_time_ms", 0.0),
                     result.get("file_name", ""),
                     result.get("file_size_bytes"),
-                    json.dumps(result.get("metadata", {})),
+                    json.dumps(result.get("metadata", {}), default=_json_default),
                     result.get("explanation", ""),
                 ),
             )

@@ -10,7 +10,6 @@ from __future__ import annotations
 import base64
 import io
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -140,7 +139,6 @@ def _generate_recommendations(result: dict) -> list[str]:
     """Generate actionable recommendations based on analysis."""
     recs = []
     risk = result.get("risk_score", 0.0)
-    verdict = result.get("verdict", "")
 
     if risk > 0.7:
         recs.append("This media shows strong indicators of AI generation or manipulation.")

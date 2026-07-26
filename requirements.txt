@@ -2,7 +2,7 @@ torch
 torchvision
 transformers
 datasets
-opencv-python
+opencv-python<5
 Pillow
 tqdm
 scikit-learn

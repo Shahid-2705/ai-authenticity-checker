@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import math
 import os
-import sys
-import tempfile
 import time
 import logging
 from typing import Any, Callable, Optional
@@ -25,10 +23,9 @@ from torchvision import transforms
 
 from core.config import get_config
 from core.types import (
-    AnalysisResult, PredictionResult, Verdict, Confidence,
-    RiskLevel, TemporalAnalysis, AudioResult,
+    Verdict, Confidence,
+    RiskLevel, TemporalAnalysis,
 )
-from core.metadata import extract_full_metadata, extract_exif
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +66,6 @@ class ModelRegistry:
         self._load_all()
 
     def _load_all(self) -> None:
-        ROOT_DIR = self.config.models_dir.parent
-
         # Local PyTorch models
         self._try_load("dino", "DINOv2AuthModel",
                        "core_models.dinov2_auth_model", "dinov2_auth_model.pth")
@@ -287,7 +282,7 @@ def forensic_score(img_pil: Image.Image) -> float:
     ela_score = min(ela_std / 20.0, 1.0)
 
     noise_score = min(max((noise_inconsistency - 0.5) / 0.6, 0.0), 1.0)
-    return 0.6 * noise_score + 0.4 * ela_score
+    return float(0.6 * noise_score + 0.4 * ela_score)
 
 
 # ──────────────────────────────────────────────
@@ -553,7 +548,7 @@ def _analyze_image_fast(
         "verdict": verdict.value,
         "confidence": confidence_enum.value,
         "risk_level": RiskLevel.from_risk_score(final_risk).value,
-        "model_agreement": f"CorefakeNet (5 heads, attention-fused)",
+        "model_agreement": "CorefakeNet (5 heads, attention-fused)",
         "model_scores": scores,
         "fusion_mode": "corefakenet_attention",
         "face_detected": has_face,

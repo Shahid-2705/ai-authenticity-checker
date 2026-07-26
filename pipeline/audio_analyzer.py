@@ -11,7 +11,6 @@ Integrates the zo9999 CNN mel-spectrogram model with:
 
 import os
 import sys
-import tempfile
 import numpy as np
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -20,7 +19,6 @@ if ROOT_DIR not in sys.path:
 
 import torch
 import librosa
-import soundfile as sf
 
 from core_models.audio_deepfake_model import AudioDeepfakeCNN
 
@@ -170,7 +168,6 @@ def analyze_spectral_artifacts(mel_db):
     scores = {}
 
     # 1. Harmonic regularity — check variance across mel bands
-    band_means = mel_db.mean(axis=1)  # (91,)
     band_stds = mel_db.std(axis=1)
 
     # AI vocoders produce very uniform energy across time in each band
@@ -351,7 +348,6 @@ class AudioAnalyzer:
                 progress_callback(len(segments) + 2, len(segments) + 3, "Computing final score...")
 
             fake_probs = [s["fake_probability"] for s in segment_results]
-            avg_fake = sum(fake_probs) / len(fake_probs)
 
             # Weighted average: higher-confidence segments get more weight
             weights = [abs(p - 0.5) + 0.5 for p in fake_probs]

@@ -19,7 +19,6 @@ Usage:
 
 import sys
 import os
-import io
 import random
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -32,7 +31,6 @@ os.environ.setdefault("HF_DATASETS_CACHE", os.path.join(ROOT_DIR, ".hf_cache", "
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
-from PIL import Image, ImageFilter
 from datasets import load_dataset
 
 
