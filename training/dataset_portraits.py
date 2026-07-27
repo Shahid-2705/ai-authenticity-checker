@@ -19,6 +19,7 @@ Usage:
 
 import sys
 import os
+import io
 import random
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -29,9 +30,27 @@ os.environ.setdefault("HF_HOME", os.path.join(ROOT_DIR, ".hf_cache"))
 os.environ.setdefault("HF_DATASETS_CACHE", os.path.join(ROOT_DIR, ".hf_cache", "datasets"))
 
 import torch
+from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 from datasets import load_dataset
+
+
+def _random_jpeg_recompress(img, quality_range=(50, 95), p=0.5):
+    """Randomly re-encode through JPEG at a random quality level.
+
+    Unlike blur/rotation/crop, this doesn't destroy the high-frequency
+    generative artifacts a frequency-domain classifier relies on — it
+    teaches the model to be robust to real-world compression variance
+    instead of overfitting to one source's specific compression profile.
+    """
+    if random.random() > p:
+        return img
+    quality = random.randint(*quality_range)
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=quality)
+    buf.seek(0)
+    return Image.open(buf).convert("RGB")
 
 
 # -------- HuggingFace dataset sources --------
@@ -235,6 +254,7 @@ class PortraitDataset(Dataset):
             from core_models.frequency_cnn import fft_to_tensor
             if self.fft_augment:
                 img = self.pre_fft_transform(img)
+                img = _random_jpeg_recompress(img)
             tensor = fft_to_tensor(img, size=256)
         elif self.transform:
             tensor = self.transform(img)
