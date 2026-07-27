@@ -105,15 +105,18 @@ def collect_predictions(device):
     freq_model = _load_frequency(device)
 
     # Load dataset — skip samples used by component models to avoid data leakage.
-    # Component models (EfficientNet texture, Frequency CNN) train on the first
-    # ~500 samples/class/source (3000 total, 3 sources, 500/class/source).
-    # We skip those and collect fresh samples for fusion training.
+    # dataset_portraits.py now has 2 sources (JamieWithofs was dropped for
+    # being unreliable). Component model consumption per class per source:
+    #   EfficientNet texture: MAX_SAMPLES=3000 -> 750/class/source
+    #   Frequency CNN:        MAX_SAMPLES=16000 -> 4000/class/source
+    # Skip past the larger of the two (4000) so neither model's training
+    # data leaks into fusion's "held-out" set.
     val_data, _ = load_portrait_dataset(
         max_samples=MAX_SAMPLES,
         train_split=1.0,
         face_align=True,
-        skip_per_class=500,  # Skip component training data
-        seed=123,            # Different seed from component training
+        skip_per_class=4000,  # Skip component training data
+        seed=123,             # Different seed from component training
     )
 
     val_transform = VAL_TRANSFORM
