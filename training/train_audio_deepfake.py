@@ -49,10 +49,14 @@ N_FFT = 2048
 HOP_LENGTH = 512
 MAX_DURATION = 5.0          # seconds (matches zo9999 training)
 
-# Dataset config — try multiple sources
+# Dataset config — try multiple sources, in order of preference.
+# moibrahimovic/fake_or_real no longer exists on the Hub.
+# ud-nlp/real-vs-fake-human-voice-deepfake-audio only has 70 total samples -
+# far too small to train on, kept only as a last-resort fallback.
 HF_DATASETS = [
-    "moibrahimovic/fake_or_real",
-    "ud-nlp/real-vs-fake-human-voice-deepfake-audio",
+    "Hemg/Deepfakeaudio",                                 # 19,817 examples
+    "garystafford/deepfake-audio-detection",              # 1,866 examples
+    "ud-nlp/real-vs-fake-human-voice-deepfake-audio",     # 70 examples
 ]
 # ==========================================
 
@@ -142,27 +146,35 @@ class AudioMelDataset(Dataset):
         return mel, label
 
 
-def _parse_label(sample):
-    """Parse label from a HuggingFace dataset sample. Returns 0=fake, 1=real, or -1 if unknown."""
+def _parse_label(sample, label_feature=None):
+    """Parse label from a HuggingFace dataset sample. Returns 0=fake, 1=real, or -1 if unknown.
+
+    label_feature: the dataset's `features["label"]` object, if present. When
+    it's a ClassLabel, its int-to-name mapping is used to resolve integer
+    labels correctly instead of guessing a numeric convention (datasets are
+    not consistent about whether 0 or 1 means "fake").
+    """
     # ASVspoof style: 'key' column
     if "key" in sample:
         raw = sample["key"]
         return 1 if raw == "bonafide" else 0
 
-    # fake_or_real style: 'label' as string or int
     if "label" in sample:
         raw = sample["label"]
         if isinstance(raw, str):
             low = raw.lower().strip()
-            if low in ("bonafide", "real", "genuine", "original", "authentic"):
-                return 1
-            elif low in ("spoof", "fake", "deepfake", "synthetic", "generated"):
-                return 0
-            return -1
+        elif label_feature is not None and hasattr(label_feature, "int2str"):
+            low = label_feature.int2str(int(raw)).lower().strip()
         else:
-            # int label: 0 = real/original, nonzero = fake (common convention)
-            # But check if it's binary (0/1) where 1=fake
+            # No ClassLabel schema to resolve against - fall back to a
+            # common convention (0=real, nonzero=fake). This is a guess.
             return 0 if int(raw) > 0 else 1
+
+        if low in ("bonafide", "real", "genuine", "original", "authentic"):
+            return 1
+        elif low in ("spoof", "fake", "deepfake", "synthetic", "generated"):
+            return 0
+        return -1
 
     if "is_fake" in sample:
         return 0 if sample["is_fake"] else 1
@@ -201,6 +213,8 @@ def load_dataset_hf():
         print("Please provide audio data manually in data/audio/real/ and data/audio/fake/")
         return None, None
 
+    label_feature = ds.features.get("label")
+
     # Reservoir sampling (Algorithm R) per class over a much longer scan.
     # Per-class quota collection that stops as soon as it's met only ever
     # samples a narrow early slice of the stream (this stream isn't even
@@ -224,7 +238,7 @@ def load_dataset_hf():
     for sample in ds:
         total_seen += 1
 
-        label = _parse_label(sample)
+        label = _parse_label(sample, label_feature)
         if label == -1:
             continue
 
