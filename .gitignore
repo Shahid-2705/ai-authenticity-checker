@@ -46,3 +46,6 @@ nul
 
 # Test images
 test_image.jpg
+
+# Local scan history (churns constantly, not meant to be shared)
+proofyx_history.db
