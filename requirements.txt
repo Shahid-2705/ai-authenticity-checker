@@ -12,6 +12,7 @@ imageio
 imageio-ffmpeg
 librosa
 soundfile
+torchcodec
 fastapi
 uvicorn
 python-dotenv

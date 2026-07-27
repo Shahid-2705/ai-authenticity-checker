@@ -201,14 +201,25 @@ def load_dataset_hf():
         print("Please provide audio data manually in data/audio/real/ and data/audio/fake/")
         return None, None
 
+    # Reservoir sampling (Algorithm R) per class over a much longer scan.
+    # Per-class quota collection that stops as soon as it's met only ever
+    # samples a narrow early slice of the stream (this stream isn't even
+    # shuffled). See the same fix already applied to train_dinov2.py,
+    # train_efficientnet_auth.py, and train_face_deepfake_hf.py.
+    ds = ds.shuffle(seed=42, buffer_size=2000)
+
     per_class = MAX_SAMPLES // 2
-    mels = []
-    labels = []
-    class_counts = {0: 0, 1: 0}  # 0=fake, 1=real
+    scan_limit = per_class * 10
+    reservoirs = {0: [], 1: []}  # 0=fake, 1=real
+    seen_counts = {0: 0, 1: 0}
     total_seen = 0
     errors = 0
+    last_printed = 0
 
-    print(f"Collecting {per_class} samples per class ({MAX_SAMPLES} total)...")
+    print(f"Reservoir-sampling {per_class} per class from up to "
+          f"{scan_limit} streamed samples ({MAX_SAMPLES} total target)...")
+
+    random.seed(42)
 
     for sample in ds:
         total_seen += 1
@@ -217,40 +228,53 @@ def load_dataset_hf():
         if label == -1:
             continue
 
-        if class_counts[label] >= per_class:
-            if all(c >= per_class for c in class_counts.values()):
-                break
-            continue
+        seen_counts[label] += 1
+        use_slot = len(reservoirs[label]) < per_class
+        replace_idx = None
+        if not use_slot:
+            j = random.randint(0, seen_counts[label] - 1)
+            if j < per_class:
+                use_slot = True
+                replace_idx = j
 
-        try:
-            audio_data = sample["audio"]
-            waveform = audio_data["array"]
-            sr = audio_data["sampling_rate"]
+        if use_slot:
+            try:
+                audio_data = sample["audio"]
+                waveform = audio_data["array"]
+                sr = audio_data["sampling_rate"]
 
-            if len(waveform) == 0:
+                if len(waveform) == 0:
+                    continue
+
+                max_samples = int(MAX_DURATION * sr)
+                waveform = waveform[:max_samples].astype(np.float32)
+                mel = audio_to_mel(waveform, sr)
+
+                if replace_idx is None:
+                    reservoirs[label].append((mel, label))
+                else:
+                    reservoirs[label][replace_idx] = (mel, label)
+
+            except Exception:
+                errors += 1
+                if errors > 50:
+                    print(f"  Too many errors ({errors}), stopping collection")
+                    break
                 continue
 
-            max_samples = int(MAX_DURATION * sr)
-            waveform = waveform[:max_samples].astype(np.float32)
+        if total_seen - last_printed >= 2000:
+            last_printed = total_seen
+            print(f"  scanned {total_seen}/{scan_limit} "
+                  f"(Fake: {len(reservoirs[0])}, Real: {len(reservoirs[1])})")
+        if total_seen >= scan_limit:
+            break
 
-            mel = audio_to_mel(waveform, sr)
-            mels.append(mel)
-            labels.append(label)
-            class_counts[label] += 1
-
-            collected = class_counts[0] + class_counts[1]
-            if collected % 200 == 0:
-                print(f"  collected {collected}/{MAX_SAMPLES} "
-                      f"(Fake: {class_counts[0]}, Real: {class_counts[1]}, scanned: {total_seen})")
-
-        except Exception:
-            errors += 1
-            if errors > 50:
-                print(f"  Too many errors ({errors}), stopping collection")
-                break
-            continue
-
-    print(f"Collected {len(mels)} samples (Fake: {class_counts[0]}, Real: {class_counts[1]}, errors: {errors})")
+    combined = reservoirs[0] + reservoirs[1]
+    mels = [m for m, _ in combined]
+    labels = [label_val for _, label_val in combined]
+    print(f"Collected {len(mels)} samples "
+          f"(Fake: {len(reservoirs[0])}, Real: {len(reservoirs[1])}, errors: {errors}) "
+          f"from {total_seen} streamed")
 
     if len(mels) < 20:
         return None, None
