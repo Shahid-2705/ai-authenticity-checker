@@ -63,7 +63,15 @@ def main():
         )
     ])
 
-    # -------- Load dataset via streaming (balanced) --------
+    # -------- Load dataset via streaming (balanced, wide reservoir sample) --------
+    # Per-class quota collection that stops as soon as it's met only ever
+    # samples a narrow early slice of the stream, since HF streaming
+    # .shuffle() only mixes within a local rolling buffer, not globally.
+    # Train/val split from that narrow slice can look artificially easy
+    # (shared quirks of that slice) without generalizing. Reservoir
+    # sampling (Algorithm R) over a much longer scan fixes this: each
+    # class's final samples are a uniform random draw from everything
+    # seen in that class, not just whatever appeared first.
     print("Loading Hugging Face dataset (streaming)...")
     stream = load_dataset(
         "Hemg/AI-Generated-vs-Real-Images-Datasets",
@@ -72,23 +80,38 @@ def main():
     ).shuffle(seed=42, buffer_size=5000)
 
     per_class = MAX_SAMPLES // 2
-    print(f"Collecting {per_class} samples per class ({MAX_SAMPLES} total)...")
-    class_buckets = {0: [], 1: []}  # 0=Real, 1=AI
+    scan_limit = per_class * 30
+    print(f"Reservoir-sampling {per_class} per class from up to "
+          f"{scan_limit} streamed samples ({MAX_SAMPLES} total target)...")
+
+    random.seed(42)
+    reservoirs = {0: [], 1: []}  # 0=Real, 1=AI
+    seen_counts = {0: 0, 1: 0}
     total_seen = 0
+
     for sample in stream:
         label = int(sample["label"])  # 0=Real, 1=AI
-        if label in class_buckets and len(class_buckets[label]) < per_class:
+        if label not in reservoirs:
+            continue
+
+        seen_counts[label] += 1
+        if len(reservoirs[label]) < per_class:
             img = sample["image"].convert("RGB")
-            class_buckets[label].append((img, float(label)))
+            reservoirs[label].append((img, float(label)))
+        else:
+            j = random.randint(0, seen_counts[label] - 1)
+            if j < per_class:
+                img = sample["image"].convert("RGB")
+                reservoirs[label][j] = (img, float(label))
+
         total_seen += 1
-        if len(class_buckets[0]) >= per_class and len(class_buckets[1]) >= per_class:
+        if total_seen >= scan_limit:
             break
 
-    samples = class_buckets[0] + class_buckets[1]
-    random.seed(42)
+    samples = reservoirs[0] + reservoirs[1]
     random.shuffle(samples)
     print(f"Collected {len(samples)} samples "
-          f"(Real: {len(class_buckets[0])}, AI: {len(class_buckets[1])}) from {total_seen} streamed")
+          f"(Real: {len(reservoirs[0])}, AI: {len(reservoirs[1])}) from {total_seen} streamed")
 
     # -------- Train / Val split --------
     split_idx = int(len(samples) * TRAIN_SPLIT)
