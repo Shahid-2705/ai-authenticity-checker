@@ -1,5 +1,6 @@
 import sys
 import os
+import random
 from tqdm import tqdm
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -62,7 +63,7 @@ def main():
         )
     ])
 
-    # -------- Load dataset via streaming (avoids full download) --------
+    # -------- Load dataset via streaming (balanced) --------
     print("Loading Hugging Face dataset (streaming)...")
     stream = load_dataset(
         "Hemg/AI-Generated-vs-Real-Images-Datasets",
@@ -70,15 +71,24 @@ def main():
         streaming=True
     ).shuffle(seed=42, buffer_size=5000)
 
-    print(f"Collecting {MAX_SAMPLES} samples...")
-    samples = []
-    for i, sample in enumerate(stream):
-        if i >= MAX_SAMPLES:
+    per_class = MAX_SAMPLES // 2
+    print(f"Collecting {per_class} samples per class ({MAX_SAMPLES} total)...")
+    class_buckets = {0: [], 1: []}  # 0=Real, 1=AI
+    total_seen = 0
+    for sample in stream:
+        label = int(sample["label"])  # 0=Real, 1=AI
+        if label in class_buckets and len(class_buckets[label]) < per_class:
+            img = sample["image"].convert("RGB")
+            class_buckets[label].append((img, float(label)))
+        total_seen += 1
+        if len(class_buckets[0]) >= per_class and len(class_buckets[1]) >= per_class:
             break
-        img = sample["image"].convert("RGB")
-        label = sample["label"]  # 0=real, 1=AI
-        samples.append((img, label))
-    print(f"Collected {len(samples)} samples")
+
+    samples = class_buckets[0] + class_buckets[1]
+    random.seed(42)
+    random.shuffle(samples)
+    print(f"Collected {len(samples)} samples "
+          f"(Real: {len(class_buckets[0])}, AI: {len(class_buckets[1])}) from {total_seen} streamed")
 
     # -------- Train / Val split --------
     split_idx = int(len(samples) * TRAIN_SPLIT)
