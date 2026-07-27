@@ -104,39 +104,57 @@ def main():
         )
     ])
 
-    # -------- Load dataset via streaming (balanced) --------
+    # -------- Load dataset via streaming (balanced, wide reservoir sample) --------
+    # This source has a strong sequential block structure (a scan of the raw
+    # unshuffled stream found 50,000+ consecutive Fake samples before any
+    # Real appeared), and its shard read order under retries/network hiccups
+    # isn't fully deterministic even with a fixed seed - one prior run found
+    # 0 Fake in 20,000+ scanned. Per-class quota collection that stops as
+    # soon as it's met only ever samples whatever narrow slice it happened
+    # to hit first. Reservoir sampling (Algorithm R) over a much longer,
+    # generously-sized scan fixes this: each class's final samples are a
+    # uniform random draw from everything seen, not just whatever appeared
+    # first, and are far more robust to this source's instability.
     print("Loading HuggingFace dataset (streaming)...")
     stream = load_dataset(
         "JamieWithofs/Deepfake-and-real-images",
         split="train",
         streaming=True
-    )
+    ).shuffle(seed=42, buffer_size=10000)
 
     per_class = MAX_SAMPLES // 2
-    print(f"Collecting {per_class} samples per class ({MAX_SAMPLES} total)...")
-    class_buckets = {0: [], 1: []}  # 0=Fake, 1=Real
+    scan_limit = per_class * 40
+    print(f"Reservoir-sampling {per_class} per class from up to "
+          f"{scan_limit} streamed samples ({MAX_SAMPLES} total target)...")
+
+    random.seed(42)
+    reservoirs = {0: [], 1: []}  # 0=Fake, 1=Real
+    seen_counts = {0: 0, 1: 0}
     total_seen = 0
     last_printed = 0
+
     for sample in stream:
         label = int(sample["label"])  # 0=Fake, 1=Real
-        if len(class_buckets[label]) < per_class:
+        seen_counts[label] += 1
+        if len(reservoirs[label]) < per_class:
             img = sample["image"].convert("RGB")
-            class_buckets[label].append((img, float(label)))
+            reservoirs[label].append((img, float(label)))
+        else:
+            j = random.randint(0, seen_counts[label] - 1)
+            if j < per_class:
+                img = sample["image"].convert("RGB")
+                reservoirs[label][j] = (img, float(label))
+
         total_seen += 1
-        collected = len(class_buckets[0]) + len(class_buckets[1])
-        if collected >= last_printed + 500:
-            last_printed = collected
-            print(f"  collected {collected}/{MAX_SAMPLES} (Fake: {len(class_buckets[0])}, Real: {len(class_buckets[1])}, scanned: {total_seen})")
-        if total_seen % 10000 == 0 and collected == last_printed:
-            print(f"  scanning... {total_seen} samples seen (Fake: {len(class_buckets[0])}, Real: {len(class_buckets[1])})")
-        if len(class_buckets[0]) >= per_class and len(class_buckets[1]) >= per_class:
+        if total_seen - last_printed >= 5000:
+            last_printed = total_seen
+            print(f"  scanned {total_seen}/{scan_limit} (Fake: {len(reservoirs[0])}, Real: {len(reservoirs[1])})")
+        if total_seen >= scan_limit:
             break
 
-    samples = class_buckets[0] + class_buckets[1]
-    print(f"Collected {len(samples)} samples (Fake: {len(class_buckets[0])}, Real: {len(class_buckets[1])}) from {total_seen} streamed")
+    samples = reservoirs[0] + reservoirs[1]
+    print(f"Collected {len(samples)} samples (Fake: {len(reservoirs[0])}, Real: {len(reservoirs[1])}) from {total_seen} streamed")
 
-    # Shuffle before split
-    random.seed(42)
     random.shuffle(samples)
 
     # -------- Train / Val split --------
