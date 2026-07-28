@@ -68,12 +68,15 @@ def audio_to_mel(waveform, sr=SAMPLE_RATE):
     )
     mel_db = librosa.power_to_db(mel, ref=np.max)
 
-    # Pad or truncate to fixed width
+    # Pad or truncate to fixed width. Pad with -80 dB (silence floor, since
+    # power_to_db(ref=np.max) puts the loudest frame at 0 dB) rather than
+    # the implicit 0 fill, which would represent peak loudness instead.
     if mel_db.shape[1] < MAX_TIME_STEPS:
         mel_db = np.pad(
             mel_db,
             ((0, 0), (0, MAX_TIME_STEPS - mel_db.shape[1])),
             mode="constant",
+            constant_values=-80.0,
         )
     else:
         mel_db = mel_db[:, :MAX_TIME_STEPS]
@@ -141,7 +144,12 @@ class AudioMelDataset(Dataset):
             if random.random() < 0.3:
                 gain = random.uniform(0.8, 1.2)
                 mel = mel * gain
-        mel = torch.tensor(mel, dtype=torch.float32).unsqueeze(0)
+        # Normalize dB range [-80, 0] to [0, 1]. The model has no BatchNorm
+        # layers; raw dB-scale input (magnitude ~40-80) caused dead ReLUs
+        # and prevented any learning. Must match pipeline/audio_analyzer.py's
+        # normalization used at inference time.
+        mel_norm = (mel + 80.0) / 80.0
+        mel = torch.tensor(mel_norm, dtype=torch.float32).unsqueeze(0)
         label = torch.tensor(self.labels[idx], dtype=torch.long)
         return mel, label
 
