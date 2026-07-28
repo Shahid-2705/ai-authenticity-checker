@@ -509,9 +509,12 @@ class ModelEnsemble:
         if self.fusion_mlp is not None:
             frame_risk = self.fusion_mlp.predict(
                 vit=vit_prob,
-                efficientnet=texture_prob,
+                texture=texture_prob,
                 forensic=forensic_prob,
                 frequency=freq_display,
+                dino=dino_prob,
+                efficientnet_auth=eff_prob,
+                face=face_prob,
             )
         else:
             # Fallback: manual weighted average

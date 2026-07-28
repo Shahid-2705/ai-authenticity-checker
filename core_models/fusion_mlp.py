@@ -4,7 +4,7 @@ Learned Fusion MLP — replaces manual weighted averaging.
 Takes calibrated per-model scores and learns optimal combination weights.
 Includes per-model temperature calibration as learnable parameters.
 
-Input:  [vit_score, efficientnet_score, forensic_score, frequency_score]
+Input:  [vit, texture, forensic, frequency, dino, efficientnet_auth, face]
 Output: P(AI-generated) after sigmoid
 
 Saves as: models/fusion_mlp.pth
@@ -48,14 +48,17 @@ class FusionMLP(nn.Module):
     Learned fusion network with integrated calibration.
 
     Architecture:
-        calibrate -> Linear(4, 8) -> ReLU -> Linear(8, 1) -> Sigmoid
+        calibrate -> Linear(n_inputs, 8) -> ReLU -> Linear(8, 1) -> Sigmoid
 
-    Input order: [vit, efficientnet, forensic, frequency]
+    Input order: MODEL_NAMES (see below)
     """
 
-    MODEL_NAMES = ["vit", "efficientnet", "forensic", "frequency"]
+    MODEL_NAMES = [
+        "vit", "texture", "forensic", "frequency",
+        "dino", "efficientnet_auth", "face",
+    ]
 
-    def __init__(self, n_inputs=4):
+    def __init__(self, n_inputs=7):
         super().__init__()
 
         self.calibrator = ModelCalibrator(n_models=n_inputs)
@@ -71,7 +74,7 @@ class FusionMLP(nn.Module):
     def forward(self, scores):
         """
         Args:
-            scores: (batch, 4) tensor of [vit, efficient, forensic, frequency]
+            scores: (batch, n_inputs) tensor matching MODEL_NAMES order.
                     Each value in [0, 1].
 
         Returns:
@@ -80,7 +83,8 @@ class FusionMLP(nn.Module):
         calibrated = self.calibrator(scores)
         return self.fusion(calibrated)
 
-    def predict(self, vit=0.0, efficientnet=0.0, forensic=0.0, frequency=0.0):
+    def predict(self, vit=0.0, texture=0.0, forensic=0.0, frequency=0.0,
+                dino=0.0, efficientnet_auth=0.0, face=0.0):
         """
         Convenience method for single-sample inference.
 
@@ -88,7 +92,8 @@ class FusionMLP(nn.Module):
             float: fused risk score in [0, 1]
         """
         scores = torch.tensor(
-            [[vit, efficientnet, forensic, frequency]], dtype=torch.float32
+            [[vit, texture, forensic, frequency, dino, efficientnet_auth, face]],
+            dtype=torch.float32,
         )
         with torch.no_grad():
             return self.forward(scores).item()

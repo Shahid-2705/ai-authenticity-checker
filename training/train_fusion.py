@@ -2,7 +2,8 @@
 Train the Fusion MLP on validation-set predictions from all models.
 
 This script:
-  1. Loads all trained component models (ViT, EfficientNet, Forensic/Frequency CNN)
+  1. Loads all trained component models (ViT, Texture, Frequency, DINOv2,
+     EfficientNet Auth, Face Deepfake) plus the Forensic heuristic
   2. Runs them on a held-out validation set to collect per-model scores
   3. Trains the FusionMLP + ModelCalibrator to optimally combine scores
 
@@ -10,7 +11,15 @@ The fusion layer learns:
   - Per-model temperature calibration (Task 5)
   - Optimal combination weights via MLP (Task 1)
 
-Input:  [vit_score, efficientnet_score, forensic_score, frequency_score]
+Previously this only combined 4 of the available signals (vit, texture,
+forensic, frequency), silently excluding dino/efficientnet_auth/face from
+the actual fused decision even though they were computed and displayed at
+inference time. Face Deepfake in particular is the strongest individual
+model (90.3% held-out accuracy) - excluding it meant its correct calls on
+real images were discarded before the final score. Now uses all 7.
+
+Input:  FusionMLP.MODEL_NAMES order:
+        [vit, texture, forensic, frequency, dino, efficientnet_auth, face]
 Output: models/fusion_mlp.pth
 
 Usage:
@@ -36,6 +45,9 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from core_models.fusion_mlp import FusionMLP
 from core_models.efficientnet_texture import EfficientNetTexture
 from core_models.frequency_cnn import FrequencyCNN, fft_to_tensor
+from core_models.dinov2_auth_model import DINOv2AuthModel
+from core_models.efficientnet_auth_model import EfficientNetAuthModel
+from core_models.face_deepfake_model import FaceDeepfakeModel
 from training.dataset_portraits import (
     load_portrait_dataset, VAL_TRANSFORM,
 )
@@ -44,6 +56,7 @@ from training.dataset_portraits import (
 FUSION_EPOCHS = 50
 FUSION_LR = 1e-3
 FUSION_BATCH = 64
+N_INPUTS = 7
 MAX_SAMPLES = 2000          # Held-out set for fusion training
 MODEL_PATH = "models/fusion_mlp.pth"
 MODELS_DIR = "models"
@@ -64,25 +77,13 @@ def _load_vit(device):
         return None, None
 
 
-def _load_efficientnet(device):
-    """Load trained EfficientNet-B4 texture model."""
-    path = os.path.join(MODELS_DIR, "efficient.pth")
+def _load_component(device, model_class, filename, name):
+    """Load a trained local component model (state_dict-only checkpoint)."""
+    path = os.path.join(MODELS_DIR, filename)
     if not os.path.exists(path):
-        print(f"WARNING: {path} not found")
+        print(f"WARNING: {path} not found ({name} excluded from fusion training)")
         return None
-    model = EfficientNetTexture().to(device)
-    model.load_state_dict(torch.load(path, map_location=device, weights_only=False))
-    model.eval()
-    return model
-
-
-def _load_frequency(device):
-    """Load trained Frequency CNN."""
-    path = os.path.join(MODELS_DIR, "frequency.pth")
-    if not os.path.exists(path):
-        print(f"WARNING: {path} not found")
-        return None
-    model = FrequencyCNN().to(device)
+    model = model_class().to(device)
     model.load_state_dict(torch.load(path, map_location=device, weights_only=False))
     model.eval()
     return model
@@ -94,15 +95,22 @@ def collect_predictions(device):
     (per-model scores, true label) pairs for fusion training.
 
     Returns:
-        scores_tensor: (N, 4) — [vit, efficient, forensic, frequency]
+        scores_tensor: (N, 7) — matches FusionMLP.MODEL_NAMES order:
+                       [vit, texture, forensic, frequency, dino,
+                        efficientnet_auth, face]
         labels_tensor: (N,) — 0=real, 1=fake
     """
     print("\n--- Collecting model predictions for fusion training ---\n")
 
     # Load models
     vit_model, vit_processor = _load_vit(device)
-    eff_model = _load_efficientnet(device)
-    freq_model = _load_frequency(device)
+    texture_model = _load_component(device, EfficientNetTexture, "efficient.pth", "texture")
+    freq_model = _load_component(device, FrequencyCNN, "frequency.pth", "frequency")
+    dino_model = _load_component(device, DINOv2AuthModel, "dinov2_auth_model.pth", "dino")
+    eff_auth_model = _load_component(
+        device, EfficientNetAuthModel, "efficientnet_auth_model.pth", "efficientnet_auth"
+    )
+    face_model = _load_component(device, FaceDeepfakeModel, "image_face_model.pth", "face")
 
     # Load dataset — skip samples used by component models to avoid data leakage.
     # dataset_portraits.py now has 2 sources (JamieWithofs was dropped for
@@ -110,7 +118,9 @@ def collect_predictions(device):
     #   EfficientNet texture: MAX_SAMPLES=3000 -> 750/class/source
     #   Frequency CNN:        MAX_SAMPLES=16000 -> 4000/class/source
     # Skip past the larger of the two (4000) so neither model's training
-    # data leaks into fusion's "held-out" set.
+    # data leaks into fusion's "held-out" set. DINOv2/EfficientNet Auth/Face
+    # were trained on entirely separate HF streams (not dataset_portraits.py),
+    # so no additional skip is needed for them.
     val_data, _ = load_portrait_dataset(
         max_samples=MAX_SAMPLES,
         train_split=1.0,
@@ -127,18 +137,18 @@ def collect_predictions(device):
     print(f"Collecting predictions from {len(val_data)} samples...")
 
     for img, label in tqdm(val_data, desc="Scoring"):
-        scores = [0.0, 0.0, 0.0, 0.0]  # vit, eff, forensic, freq
+        # Order matches FusionMLP.MODEL_NAMES
+        scores = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+        rgb_img = img.convert("RGB")
 
         # ViT score
         if vit_model is not None and vit_processor is not None:
             try:
-                inputs = vit_processor(
-                    images=img.convert("RGB"), return_tensors="pt"
-                ).to(device)
+                inputs = vit_processor(images=rgb_img, return_tensors="pt").to(device)
                 with torch.no_grad():
                     logits = vit_model(**inputs).logits
                     probs = torch.softmax(logits, dim=1)
-                    # Find fake class
                     fake_idx = [
                         k for k, v in vit_model.config.id2label.items()
                         if "fake" in v.lower()
@@ -150,12 +160,17 @@ def collect_predictions(device):
             except Exception:
                 pass
 
+        # Shared 224x224 tensor for texture/dino/efficientnet_auth/face
+        try:
+            tensor = val_transform(rgb_img).unsqueeze(0).to(device)
+        except Exception:
+            tensor = None
+
         # EfficientNet texture score
-        if eff_model is not None:
+        if texture_model is not None and tensor is not None:
             try:
-                tensor = val_transform(img.convert("RGB")).unsqueeze(0).to(device)
                 with torch.no_grad():
-                    scores[1] = eff_model(tensor).item()
+                    scores[1] = texture_model(tensor).item()
             except Exception:
                 pass
 
@@ -175,6 +190,31 @@ def collect_predictions(device):
             except Exception:
                 pass
 
+        # DINOv2 score
+        if dino_model is not None and tensor is not None:
+            try:
+                with torch.no_grad():
+                    scores[4] = dino_model(tensor).item()
+            except Exception:
+                pass
+
+        # EfficientNet Auth score
+        if eff_auth_model is not None and tensor is not None:
+            try:
+                with torch.no_grad():
+                    scores[5] = eff_auth_model(tensor).item()
+            except Exception:
+                pass
+
+        # Face Deepfake score (model outputs P(real); fusion wants P(fake))
+        if face_model is not None and tensor is not None:
+            try:
+                with torch.no_grad():
+                    real_prob = face_model(tensor).item()
+                    scores[6] = 1.0 - real_prob
+            except Exception:
+                pass
+
         all_scores.append(scores)
         all_labels.append(float(label))
 
@@ -182,10 +222,11 @@ def collect_predictions(device):
     labels_tensor = torch.tensor(all_labels, dtype=torch.float32)
 
     print(f"\nCollected {len(all_scores)} prediction vectors")
-    print(f"Score means: vit={scores_tensor[:, 0].mean():.3f}, "
-          f"eff={scores_tensor[:, 1].mean():.3f}, "
-          f"forensic={scores_tensor[:, 2].mean():.3f}, "
-          f"freq={scores_tensor[:, 3].mean():.3f}")
+    names = FusionMLP.MODEL_NAMES
+    means = ", ".join(
+        f"{name}={scores_tensor[:, i].mean():.3f}" for i, name in enumerate(names)
+    )
+    print(f"Score means: {means}")
     print(f"Labels: {(labels_tensor == 1).sum().item()} fake, "
           f"{(labels_tensor == 0).sum().item()} real")
 
@@ -197,7 +238,7 @@ def train_fusion(scores, labels, device):
     Train FusionMLP on collected model predictions.
 
     Args:
-        scores: (N, 4) per-model scores
+        scores: (N, 7) per-model scores, matching FusionMLP.MODEL_NAMES order
         labels: (N,) ground truth (0=real, 1=fake)
     """
     print("\n--- Training Fusion MLP ---\n")
@@ -219,7 +260,7 @@ def train_fusion(scores, labels, device):
     val_loader = DataLoader(val_ds, batch_size=FUSION_BATCH, shuffle=False)
 
     # Model
-    model = FusionMLP(n_inputs=4).to(device)
+    model = FusionMLP(n_inputs=N_INPUTS).to(device)
     criterion = nn.BCELoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=FUSION_LR, weight_decay=1e-3)
     scheduler = CosineAnnealingLR(optimizer, T_max=FUSION_EPOCHS, eta_min=1e-5)
@@ -269,8 +310,10 @@ def train_fusion(scores, labels, device):
 
             # Print learned temperatures
             temps = model.calibrator.temperatures.data.cpu().numpy()
-            print(f"  Temperatures: vit={temps[0]:.3f}, eff={temps[1]:.3f}, "
-                  f"forensic={temps[2]:.3f}, freq={temps[3]:.3f}")
+            temp_str = ", ".join(
+                f"{name}={t:.3f}" for name, t in zip(FusionMLP.MODEL_NAMES, temps)
+            )
+            print(f"  Temperatures: {temp_str}")
 
         if avg_val < best_val_loss:
             best_val_loss = avg_val

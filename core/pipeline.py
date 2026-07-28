@@ -395,9 +395,12 @@ def _analyze_image_ensemble(
     if fusion_mlp is not None:
         final_risk = fusion_mlp.predict(
             vit=scores.get("vit", 0.0),
-            efficientnet=scores.get("texture", 0.0),
+            texture=scores.get("texture", 0.0),
             forensic=scores.get("forensic", 0.0),
             frequency=scores.get("frequency", 0.0),
+            dino=scores.get("dino", 0.0),
+            efficientnet_auth=scores.get("efficientnet", 0.0),
+            face=scores.get("face", 0.0),
         )
     else:
         fusion_mode = "weighted_avg"

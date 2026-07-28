@@ -58,7 +58,7 @@
     "path": "fusion_mlp.pth",
     "weight": null,
     "enabled": true,
-    "n_inputs": 4,
+    "n_inputs": 7,
     "description": "Learned fusion with temperature calibration"
   },
   "corefakenet": {
