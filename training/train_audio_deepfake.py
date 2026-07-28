@@ -34,7 +34,7 @@ from core_models.audio_deepfake_model import AudioDeepfakeCNN
 # ================= CONFIG =================
 BATCH_SIZE = 32
 EPOCHS = 20
-LR = 1e-3
+LR = 3e-4
 TRAIN_SPLIT = 0.85
 MAX_SAMPLES = 8000          # Total samples to collect
 MODEL_PATH = "models/audio_deepfake_model.pth"
