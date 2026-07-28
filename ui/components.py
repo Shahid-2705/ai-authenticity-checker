@@ -99,30 +99,27 @@ def generate_score_bars_html(scores_dict: dict[str, float]) -> str:
 # ──────────────────────────────────────────────
 
 def generate_verdict_html(verdict_str: str) -> str:
-    """Color-coded verdict badge card with 4-tier system."""
+    """Color-coded verdict badge card with 2-tier system (60% cutoff)."""
     if not verdict_str:
         return ""
 
     upper = verdict_str.upper()
-    if "LIKELY MANIPULATED" in upper:
+    if "AI-GENERATED" in upper or "AI GENERATED" in upper:
         bg, border, color = "rgba(236,72,153,0.1)", "rgba(236,72,153,0.3)", "#EC4899"
         icon = "&#9888;"
-    elif "POSSIBLY MANIPULATED" in upper:
+    elif "AUTHENTIC" in upper:
+        bg, border, color = "rgba(16,185,129,0.1)", "rgba(16,185,129,0.3)", "#10B981"
+        icon = "&#10003;"
+    # Legacy fallback (old 4-tier labels / history entries predating this)
+    elif "LIKELY MANIPULATED" in upper or "HIGH" in upper or "CRITICAL" in upper:
+        bg, border, color = "rgba(236,72,153,0.1)", "rgba(236,72,153,0.3)", "#EC4899"
+        icon = "&#9888;"
+    elif "POSSIBLY MANIPULATED" in upper or "MEDIUM" in upper:
         bg, border, color = "rgba(245,158,11,0.1)", "rgba(245,158,11,0.3)", "#F59E0B"
         icon = "&#9888;"
     elif "UNCERTAIN" in upper:
         bg, border, color = "rgba(148,163,184,0.1)", "rgba(148,163,184,0.3)", "#94A3B8"
         icon = "&#63;"
-    elif "LIKELY AUTHENTIC" in upper:
-        bg, border, color = "rgba(16,185,129,0.1)", "rgba(16,185,129,0.3)", "#10B981"
-        icon = "&#10003;"
-    # Legacy fallback
-    elif "HIGH" in upper or "CRITICAL" in upper:
-        bg, border, color = "rgba(236,72,153,0.1)", "rgba(236,72,153,0.3)", "#EC4899"
-        icon = "&#9888;"
-    elif "MEDIUM" in upper:
-        bg, border, color = "rgba(245,158,11,0.1)", "rgba(245,158,11,0.3)", "#F59E0B"
-        icon = "&#9888;"
     else:
         bg, border, color = "rgba(16,185,129,0.1)", "rgba(16,185,129,0.3)", "#10B981"
         icon = "&#10003;"

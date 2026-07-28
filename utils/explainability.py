@@ -17,23 +17,14 @@ def explain_risk(score, model_scores=None):
     Returns:
         str with detailed risk explanation.
     """
-    if score > 0.8:
-        level = "CRITICAL"
-        desc = "Very high probability of AI manipulation"
-    elif score > 0.6:
-        level = "HIGH"
+    if score >= 0.60:
+        level = "AI-GENERATED"
         desc = "Strong indicators of AI generation or manipulation"
-    elif score > 0.4:
-        level = "MEDIUM"
-        desc = "Some manipulation indicators detected"
-    elif score > 0.2:
-        level = "LOW"
-        desc = "Minor anomalies, likely authentic"
     else:
-        level = "MINIMAL"
+        level = "AUTHENTIC"
         desc = "No significant manipulation indicators"
 
-    explanation = f"{level} RISK — {desc}"
+    explanation = f"{level} — {desc}"
 
     if model_scores:
         evidence = []
@@ -58,14 +49,10 @@ def explain_risk(score, model_scores=None):
 
 def explain_audio_risk(fake_prob):
     """Explain audio deepfake risk level."""
-    if fake_prob > 0.7:
-        return "HIGH RISK — AI-generated speech detected (voice cloning / TTS)"
-    elif fake_prob > 0.5:
-        return "MEDIUM RISK — Possible AI-generated audio"
-    elif fake_prob > 0.3:
-        return "LOW RISK — Inconclusive, minor anomalies detected"
+    if fake_prob >= 0.60:
+        return "AI-GENERATED — AI-generated speech detected (voice cloning / TTS)"
     else:
-        return "MINIMAL RISK — Audio appears authentic"
+        return "AUTHENTIC — Audio appears authentic"
 
 
 def explain_multimodal(modality_scores, final_score):
@@ -86,17 +73,13 @@ def explain_multimodal(modality_scores, final_score):
 
     parts = []
     for mod, score in active.items():
-        if score > 70:
-            parts.append(f"{mod}: high risk ({score}%)")
-        elif score > 40:
-            parts.append(f"{mod}: medium risk ({score}%)")
+        if score >= 60:
+            parts.append(f"{mod}: AI-generated ({score}%)")
         else:
-            parts.append(f"{mod}: low risk ({score}%)")
+            parts.append(f"{mod}: authentic ({score}%)")
 
-    if final_score > 0.7:
+    if final_score >= 0.60:
         verdict = "Strong evidence of manipulation across modalities"
-    elif final_score > 0.4:
-        verdict = "Partial manipulation indicators detected"
     else:
         verdict = "Content appears authentic across analyzed modalities"
 

@@ -23,6 +23,9 @@ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 # Verdict color mapping
 VERDICT_COLORS = {
+    "AI-GENERATED": {"bg": "#2d0a0a", "border": "#ef4444", "text": "#ef4444"},
+    "AUTHENTIC": {"bg": "#0a2d1a", "border": "#10b981", "text": "#10b981"},
+    # Legacy 4-tier labels, kept so old history entries still render correctly
     "LIKELY MANIPULATED": {"bg": "#2d0a0a", "border": "#ef4444", "text": "#ef4444"},
     "POSSIBLY MANIPULATED": {"bg": "#2d1f0a", "border": "#f59e0b", "text": "#f59e0b"},
     "UNCERTAIN": {"bg": "#1a1a2e", "border": "#94a3b8", "text": "#94a3b8"},
@@ -140,13 +143,10 @@ def _generate_recommendations(result: dict) -> list[str]:
     recs = []
     risk = result.get("risk_score", 0.0)
 
-    if risk > 0.7:
+    if risk >= 0.60:
         recs.append("This media shows strong indicators of AI generation or manipulation.")
         recs.append("Do not share as authentic content without further verification.")
         recs.append("Consider reverse image search to check for original sources.")
-    elif risk > 0.45:
-        recs.append("Some manipulation indicators detected. Exercise caution.")
-        recs.append("Cross-reference with original source if available.")
     else:
         recs.append("No strong manipulation indicators detected.")
         recs.append("Analysis does not guarantee authenticity — exercise normal judgment.")
