@@ -395,8 +395,14 @@ def main():
             mels_batch = mels_batch.to(device)
             labels_batch = labels_batch.to(device)
 
-            preds = model(mels_batch)
-            loss = criterion(preds, labels_batch)
+            # AudioDeepfakeCNN.forward() applies softmax internally (its
+            # public contract, relied on elsewhere e.g. AudioAnalyzer).
+            # CrossEntropyLoss also applies softmax internally, so feeding
+            # it model(x) double-softmaxes and collapses gradients to
+            # near-zero. Compose the submodules directly to get raw logits
+            # for the loss instead.
+            logits = model.classifier(model.features(mels_batch))
+            loss = criterion(logits, labels_batch)
 
             optimizer.zero_grad()
             loss.backward()
@@ -417,11 +423,11 @@ def main():
                 mels_batch = mels_batch.to(device)
                 labels_batch = labels_batch.to(device)
 
-                preds = model(mels_batch)
-                loss = criterion(preds, labels_batch)
+                logits = model.classifier(model.features(mels_batch))
+                loss = criterion(logits, labels_batch)
                 val_loss += loss.item()
 
-                pred_labels = preds.argmax(dim=1)
+                pred_labels = logits.argmax(dim=1)
                 correct += (pred_labels == labels_batch).sum().item()
                 total += labels_batch.size(0)
 
