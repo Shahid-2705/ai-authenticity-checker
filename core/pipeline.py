@@ -77,6 +77,8 @@ class ModelRegistry:
                        "core_models.efficientnet_texture", "efficient.pth")
         self._try_load("frequency", "FrequencyCNN",
                        "core_models.frequency_cnn", "frequency.pth")
+        self._try_load("video_lstm", "VideoTemporalLSTM",
+                       "core_models.video_lstm", "video_lstm.pth")
 
         # FusionMLP (special: needs n_inputs arg)
         self._try_load_fusion()
@@ -196,6 +198,7 @@ class ModelRegistry:
                 texture_model=self.models.get("texture"),
                 freq_cnn=self.models.get("frequency"),
                 fusion_mlp=self.models.get("fusion"),
+                video_lstm=self.models.get("video_lstm"),
             )
         except Exception as e:
             logger.warning("Could not init VideoAnalyzer: %s", e)

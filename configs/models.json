@@ -52,6 +52,15 @@
     "enabled": true,
     "description": "EfficientNetV2-S authentication"
   },
+  "video_lstm": {
+    "type": "local",
+    "class": "VideoTemporalLSTM",
+    "path": "video_lstm.pth",
+    "weight": null,
+    "enabled": true,
+    "video_only": true,
+    "description": "LSTM over per-frame fusion scores; replaces heuristic TemporalAnalyzer for video temporal consistency"
+  },
   "fusion": {
     "type": "local",
     "class": "FusionMLP",
