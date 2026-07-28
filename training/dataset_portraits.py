@@ -2,8 +2,8 @@
 Dataset loader for AI-generated portrait detection.
 
 Streams balanced datasets from HuggingFace:
-  - Diffusion-generated faces
-  - GAN portraits (StyleGAN, etc.)
+  - GAN portraits (StyleGAN, etc.) — PORTRAIT_SOURCES
+  - Diffusion-generated faces (SD Inpainting/text2img, InsightFace) — DeepFakeFace
   - Real portrait photos
 
 All images are face-aligned and cropped before being returned.
@@ -21,6 +21,7 @@ import sys
 import os
 import io
 import random
+import zipfile
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
@@ -78,6 +79,22 @@ PORTRAIT_SOURCES = [
         "real_value": 1,
     },
 ]
+
+# -------- Diffusion-generated source (not HF-streamable, handled separately) --------
+# training/eval_image_benchmark.py found the ensemble at 30.8% accuracy against
+# this dataset (13.3%/6.7%/20.0% on inpainting/insight/text2img fakes) despite
+# 83.3% on real photos — every PORTRAIT_SOURCES entry above is GAN/face-swap
+# style, so nothing here has ever taught the models what diffusion-model
+# output looks like. Added as a third contributor to load_portrait_dataset().
+DEEPFAKEFACE_REPO = "OpenRL/DeepFakeFace"
+DEEPFAKEFACE_FAKE_ZIPS = ["inpainting.zip", "insight.zip", "text2img.zip"]
+DEEPFAKEFACE_REAL_ZIP = "wiki.zip"
+DEEPFAKEFACE_IMG_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+# Must match eval_image_benchmark.py's --seed/--per-category defaults exactly —
+# this is how training samples are guaranteed to exclude the benchmark's
+# held-out images (same shuffle, we just start reading further down the list).
+DEEPFAKEFACE_BENCHMARK_SEED = 42
+DEEPFAKEFACE_BENCHMARK_HOLDOUT = 30
 
 
 def _try_detect_face_crop(pil_img, expand_ratio=0.3):
@@ -206,6 +223,81 @@ def collect_from_source(source, per_class, face_align=True, skip_per_class=0,
     return fake_reservoir + real_reservoir
 
 
+def _sample_deepfakeface_zip(filename, n, skip, face_align):
+    """
+    Sample n images from one OpenRL/DeepFakeFace zip member, via plain
+    random sampling — not reservoir sampling, because zipfile.namelist()
+    already gives the full member list up front (no streaming visibility
+    problem to work around here, unlike the HF-streaming sources above).
+
+    Always shuffles with DEEPFAKEFACE_BENCHMARK_SEED first and discards the
+    first DEEPFAKEFACE_BENCHMARK_HOLDOUT entries — the exact slice
+    eval_image_benchmark.py already consumed — so training data can never
+    overlap with that held-out benchmark, by construction.
+    """
+    from huggingface_hub import hf_hub_download
+
+    try:
+        zip_path = hf_hub_download(
+            repo_id=DEEPFAKEFACE_REPO, repo_type="dataset", filename=filename
+        )
+    except Exception as e:
+        print(f"    WARNING: could not fetch {filename}: {e}")
+        return []
+
+    with zipfile.ZipFile(zip_path) as zf:
+        members = [m for m in zf.namelist() if m.lower().endswith(DEEPFAKEFACE_IMG_EXTS)]
+        rng = random.Random(DEEPFAKEFACE_BENCHMARK_SEED)
+        rng.shuffle(members)
+        remaining = members[DEEPFAKEFACE_BENCHMARK_HOLDOUT:]
+        if skip:
+            remaining = remaining[skip:]
+        chosen = remaining[:n]
+
+        images = []
+        for m in chosen:
+            try:
+                with zf.open(m) as f:
+                    img = Image.open(io.BytesIO(f.read())).convert("RGB")
+                if face_align:
+                    img = _try_detect_face_crop(img)
+                images.append(img)
+            except Exception:
+                continue
+        return images
+
+
+def collect_from_deepfakeface(per_class, face_align=True, skip_per_class=0):
+    """
+    Collect diffusion-generated fakes (Stable Diffusion Inpainting/text2img,
+    InsightFace) and real photos (IMDB-WIKI) from OpenRL/DeepFakeFace.
+
+    Fakes are split evenly across the 3 generation methods so no single
+    diffusion technique dominates the sample.
+
+    Returns:
+        list of (PIL.Image, label) — label 0=real, 1=fake.
+    """
+    print(f"  Loading {DEEPFAKEFACE_REPO} (diffusion-generated, excludes "
+          f"benchmark's held-out {DEEPFAKEFACE_BENCHMARK_HOLDOUT}/zip)...")
+
+    per_fake_zip = max(1, per_class // len(DEEPFAKEFACE_FAKE_ZIPS))
+    fake_skip = skip_per_class // len(DEEPFAKEFACE_FAKE_ZIPS) if skip_per_class else 0
+
+    fake_images = []
+    for fz in DEEPFAKEFACE_FAKE_ZIPS:
+        fake_images.extend(_sample_deepfakeface_zip(fz, per_fake_zip, fake_skip, face_align))
+
+    real_images = _sample_deepfakeface_zip(
+        DEEPFAKEFACE_REAL_ZIP, per_class, skip_per_class, face_align
+    )
+
+    print(f"    Collected: {len(fake_images)} fake, {len(real_images)} real "
+          f"from {DEEPFAKEFACE_REPO}")
+
+    return [(img, 1) for img in fake_images] + [(img, 0) for img in real_images]
+
+
 def load_portrait_dataset(max_samples=4000, train_split=0.85, face_align=True,
                           skip_per_class=0, seed=42):
     """
@@ -223,11 +315,12 @@ def load_portrait_dataset(max_samples=4000, train_split=0.85, face_align=True,
         (train_samples, val_samples) — each is list of (PIL.Image, label)
         label: 0=real, 1=fake (AI-generated)
     """
-    per_source = max_samples // len(PORTRAIT_SOURCES)
+    n_sources = len(PORTRAIT_SOURCES) + 1  # +1 for DeepFakeFace (diffusion)
+    per_source = max_samples // n_sources
     per_class = per_source // 2
 
     print(f"Loading portrait dataset: {max_samples} target samples from "
-          f"{len(PORTRAIT_SOURCES)} sources ({per_class} per class per source)"
+          f"{n_sources} sources ({per_class} per class per source)"
           + (f", skipping {skip_per_class}/class/source" if skip_per_class else ""))
 
     all_samples = []
@@ -237,6 +330,12 @@ def load_portrait_dataset(max_samples=4000, train_split=0.85, face_align=True,
             skip_per_class=skip_per_class,
         )
         all_samples.extend(samples)
+
+    all_samples.extend(
+        collect_from_deepfakeface(
+            per_class, face_align=face_align, skip_per_class=skip_per_class,
+        )
+    )
 
     # Balance classes
     fake = [s for s in all_samples if s[1] == 1]
