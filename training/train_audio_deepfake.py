@@ -1,10 +1,12 @@
 """
 Training script for the Audio Deepfake CNN model.
 
-Trains on the ASVspoof 2019 LA dataset (same as zo9999) via HuggingFace,
-or falls back to a smaller public dataset if unavailable.
+Combines samples from multiple HuggingFace real/fake speech datasets
+(see HF_DATASETS) so the model learns real-vs-fake characteristics that
+hold across recording conditions, rather than shortcut-learning a single
+source's acoustic fingerprint.
 
-Architecture: 2-layer CNN on mel-spectrograms (matches zo9999 exactly).
+Architecture: 2-layer CNN on mel-spectrograms with BatchNorm.
 
 Usage:
     python training/train_audio_deepfake.py
@@ -49,14 +51,20 @@ N_FFT = 2048
 HOP_LENGTH = 512
 MAX_DURATION = 5.0          # seconds (matches zo9999 training)
 
-# Dataset config — try multiple sources, in order of preference.
+# Dataset config — samples are COMBINED from all sources below, not just
+# tried as a fallback chain. A held-out cross-dataset check found a model
+# trained on Hemg/Deepfakeaudio alone reached 100% on its own validation
+# split but only 52.7% (near-random, always guessing "real") when tested
+# against garystafford/deepfake-audio-detection - it had learned Hemg's
+# specific recording/compression fingerprint instead of genuine real-vs-
+# fake characteristics. Combining diverse sources forces the model to
+# learn features that hold across recording conditions.
 # moibrahimovic/fake_or_real no longer exists on the Hub.
 # ud-nlp/real-vs-fake-human-voice-deepfake-audio only has 70 total samples -
-# far too small to train on, kept only as a last-resort fallback.
+# too small to meaningfully contribute, excluded.
 HF_DATASETS = [
-    "Hemg/Deepfakeaudio",                                 # 19,817 examples
-    "garystafford/deepfake-audio-detection",              # 1,866 examples
-    "ud-nlp/real-vs-fake-human-voice-deepfake-audio",     # 70 examples
+    "Hemg/Deepfakeaudio",                     # 19,817 examples
+    "garystafford/deepfake-audio-detection",  # 1,866 examples
 ]
 # ==========================================
 
@@ -190,58 +198,45 @@ def _parse_label(sample, label_feature=None):
     return -1
 
 
-def load_dataset_hf():
-    """Load audio samples from HuggingFace datasets (tries multiple sources)."""
+def _collect_from_source(ds_name, per_class_target, scan_limit):
+    """Reservoir-sample up to per_class_target fake/real mel-spectrograms
+    from a single HF dataset, scanning up to scan_limit total samples.
+
+    Uses Algorithm R per class so the final samples are a uniform random
+    draw across the whole scan range, not just whatever appeared first
+    (this stream isn't shuffled by the source, and per-class quota
+    collection that stops the instant it's met only ever samples a
+    narrow early slice - see the same fix in train_dinov2.py et al).
+
+    Returns: (reservoirs dict {0: [...], 1: [...]}, total_seen, errors)
+    """
     from datasets import load_dataset, Audio
 
-    # Force soundfile backend (avoids torchcodec/FFmpeg issues on Windows)
-    import datasets.config
-    datasets.config.AUDIO_DECODER_BACKEND = "soundfile"
-
-    ds = None
-    for ds_name in HF_DATASETS:
-        print(f"Attempting to load: {ds_name}")
-        try:
-            ds = load_dataset(ds_name, split="train", streaming=True)
-            ds = ds.cast_column("audio", Audio(sampling_rate=SAMPLE_RATE, decode=True))
-            # Test that we can actually read a sample
-            sample = next(iter(ds))
-            print(f"  Columns: {list(sample.keys())}")
-            # Re-create the iterator since we consumed one
-            ds = load_dataset(ds_name, split="train", streaming=True)
-            ds = ds.cast_column("audio", Audio(sampling_rate=SAMPLE_RATE, decode=True))
-            print(f"  Successfully connected to {ds_name}")
-            break
-        except Exception as e:
-            print(f"  Failed: {e}")
-            ds = None
-
-    if ds is None:
-        print("\nAll HuggingFace datasets failed.")
-        print("Please provide audio data manually in data/audio/real/ and data/audio/fake/")
-        return None, None
+    print(f"\nAttempting to load: {ds_name}")
+    try:
+        ds = load_dataset(ds_name, split="train", streaming=True)
+        ds = ds.cast_column("audio", Audio(sampling_rate=SAMPLE_RATE, decode=True))
+        sample = next(iter(ds))
+        print(f"  Columns: {list(sample.keys())}")
+        # Re-create the iterator since we consumed one testing it
+        ds = load_dataset(ds_name, split="train", streaming=True)
+        ds = ds.cast_column("audio", Audio(sampling_rate=SAMPLE_RATE, decode=True))
+        print(f"  Successfully connected to {ds_name}")
+    except Exception as e:
+        print(f"  Failed: {e}")
+        return {0: [], 1: []}, 0, 0
 
     label_feature = ds.features.get("label")
-
-    # Reservoir sampling (Algorithm R) per class over a much longer scan.
-    # Per-class quota collection that stops as soon as it's met only ever
-    # samples a narrow early slice of the stream (this stream isn't even
-    # shuffled). See the same fix already applied to train_dinov2.py,
-    # train_efficientnet_auth.py, and train_face_deepfake_hf.py.
     ds = ds.shuffle(seed=42, buffer_size=2000)
 
-    per_class = MAX_SAMPLES // 2
-    scan_limit = per_class * 10
     reservoirs = {0: [], 1: []}  # 0=fake, 1=real
     seen_counts = {0: 0, 1: 0}
     total_seen = 0
     errors = 0
     last_printed = 0
 
-    print(f"Reservoir-sampling {per_class} per class from up to "
-          f"{scan_limit} streamed samples ({MAX_SAMPLES} total target)...")
-
-    random.seed(42)
+    print(f"  Reservoir-sampling {per_class_target} per class from up to "
+          f"{scan_limit} streamed samples...")
 
     for sample in ds:
         total_seen += 1
@@ -251,11 +246,11 @@ def load_dataset_hf():
             continue
 
         seen_counts[label] += 1
-        use_slot = len(reservoirs[label]) < per_class
+        use_slot = len(reservoirs[label]) < per_class_target
         replace_idx = None
         if not use_slot:
             j = random.randint(0, seen_counts[label] - 1)
-            if j < per_class:
+            if j < per_class_target:
                 use_slot = True
                 replace_idx = j
 
@@ -280,23 +275,53 @@ def load_dataset_hf():
             except Exception:
                 errors += 1
                 if errors > 50:
-                    print(f"  Too many errors ({errors}), stopping collection")
+                    print(f"    Too many errors ({errors}), stopping this source")
                     break
                 continue
 
         if total_seen - last_printed >= 2000:
             last_printed = total_seen
-            print(f"  scanned {total_seen}/{scan_limit} "
+            print(f"    scanned {total_seen}/{scan_limit} "
                   f"(Fake: {len(reservoirs[0])}, Real: {len(reservoirs[1])})")
         if total_seen >= scan_limit:
             break
 
-    combined = reservoirs[0] + reservoirs[1]
+    print(f"  Collected from {ds_name}: Fake={len(reservoirs[0])}, "
+          f"Real={len(reservoirs[1])} (errors: {errors}) from {total_seen} streamed")
+    return reservoirs, total_seen, errors
+
+
+def load_dataset_hf():
+    """Load audio samples, COMBINING all sources in HF_DATASETS.
+
+    A model trained on a single source reached 100% on its own validation
+    split but only 52.7% (near-random) on a different dataset - it learned
+    that source's recording/compression fingerprint instead of genuine
+    real-vs-fake characteristics. Combining diverse sources forces the
+    model to learn features that hold across recording conditions.
+    """
+    import datasets.config
+    datasets.config.AUDIO_DECODER_BACKEND = "soundfile"  # avoids torchcodec/FFmpeg issues on Windows
+
+    random.seed(42)
+
+    per_class = MAX_SAMPLES // 2
+    per_class_per_source = per_class // len(HF_DATASETS)
+    scan_limit_per_source = per_class_per_source * 10
+
+    all_mels = {0: [], 1: []}
+    for ds_name in HF_DATASETS:
+        reservoirs, _, _ = _collect_from_source(
+            ds_name, per_class_per_source, scan_limit_per_source
+        )
+        all_mels[0].extend(reservoirs[0])
+        all_mels[1].extend(reservoirs[1])
+
+    combined = all_mels[0] + all_mels[1]
     mels = [m for m, _ in combined]
     labels = [label_val for _, label_val in combined]
-    print(f"Collected {len(mels)} samples "
-          f"(Fake: {len(reservoirs[0])}, Real: {len(reservoirs[1])}, errors: {errors}) "
-          f"from {total_seen} streamed")
+    print(f"\nTotal combined from {len(HF_DATASETS)} sources: {len(mels)} samples "
+          f"(Fake: {len(all_mels[0])}, Real: {len(all_mels[1])})")
 
     if len(mels) < 20:
         return None, None
