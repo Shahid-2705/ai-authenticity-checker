@@ -95,16 +95,31 @@ def _try_detect_face_crop(pil_img, expand_ratio=0.3):
     return pil_img
 
 
-def collect_from_source(source, per_class, face_align=True, skip_per_class=0):
+def collect_from_source(source, per_class, face_align=True, skip_per_class=0,
+                         scan_multiplier=20):
     """
     Collect balanced samples from a single HuggingFace dataset source.
+
+    Uses reservoir sampling (Algorithm R) per class over a wide scan, so the
+    final samples are a uniform random draw across the whole scanned range
+    rather than just whatever appeared first. Per-class quota collection
+    that stops the instant it's met only ever samples a narrow early slice
+    of the stream, which risks the model overfitting to that slice's quirks
+    instead of learning something that generalizes (confirmed with a real
+    train/held-out accuracy gap for CorefakeNet before this fix - see the
+    same fix already applied to train_dinov2.py, train_efficientnet_auth.py,
+    and train_face_deepfake_hf.py).
 
     Args:
         source: dict with dataset config
         per_class: target samples per class
         face_align: whether to apply face detection and cropping
         skip_per_class: skip this many samples per class before collecting
-                        (used to avoid overlap with component model training data)
+                        (used to avoid overlap with component model training
+                        data - e.g. train_fusion.py's held-out set). Reservoir
+                        sampling is applied to what's scanned after the skip.
+        scan_multiplier: scan up to (per_class + skip_per_class) * this many
+                        samples total
 
     Returns:
         list of (PIL.Image, label) where label is 0=real, 1=fake (normalized)
@@ -120,43 +135,75 @@ def collect_from_source(source, per_class, face_align=True, skip_per_class=0):
         print(f"  WARNING: Could not load {source['id']}: {e}")
         return []
 
-    fake_samples = []
-    real_samples = []
+    scan_limit = (per_class + skip_per_class) * scan_multiplier
+
+    fake_reservoir = []
+    real_reservoir = []
     fake_skipped = 0
     real_skipped = 0
+    fake_seen = 0  # count of post-skip fake samples seen (for reservoir)
+    real_seen = 0
     total_seen = 0
+    last_printed = 0
+
+    random.seed(42)
 
     for sample in stream:
         raw_label = int(sample[source["label_col"]])
+        total_seen += 1
 
         if raw_label == source["fake_value"]:
             if fake_skipped < skip_per_class:
                 fake_skipped += 1
-            elif len(fake_samples) < per_class:
-                img = sample[source["image_col"]].convert("RGB")
-                if face_align:
-                    img = _try_detect_face_crop(img)
-                fake_samples.append((img, 1))  # Normalized: 1=fake
+            else:
+                fake_seen += 1
+                use_slot = len(fake_reservoir) < per_class
+                replace_idx = None
+                if not use_slot:
+                    j = random.randint(0, fake_seen - 1)
+                    if j < per_class:
+                        use_slot = True
+                        replace_idx = j
+                if use_slot:
+                    img = sample[source["image_col"]].convert("RGB")
+                    if face_align:
+                        img = _try_detect_face_crop(img)
+                    if replace_idx is None:
+                        fake_reservoir.append((img, 1))  # Normalized: 1=fake
+                    else:
+                        fake_reservoir[replace_idx] = (img, 1)
         elif raw_label == source["real_value"]:
             if real_skipped < skip_per_class:
                 real_skipped += 1
-            elif len(real_samples) < per_class:
-                img = sample[source["image_col"]].convert("RGB")
-                if face_align:
-                    img = _try_detect_face_crop(img)
-                real_samples.append((img, 0))  # Normalized: 0=real
+            else:
+                real_seen += 1
+                use_slot = len(real_reservoir) < per_class
+                replace_idx = None
+                if not use_slot:
+                    j = random.randint(0, real_seen - 1)
+                    if j < per_class:
+                        use_slot = True
+                        replace_idx = j
+                if use_slot:
+                    img = sample[source["image_col"]].convert("RGB")
+                    if face_align:
+                        img = _try_detect_face_crop(img)
+                    if replace_idx is None:
+                        real_reservoir.append((img, 0))  # Normalized: 0=real
+                    else:
+                        real_reservoir[replace_idx] = (img, 0)
 
-        total_seen += 1
+        if total_seen - last_printed >= 5000:
+            last_printed = total_seen
+            print(f"    scanned {total_seen}/{scan_limit} "
+                  f"(Fake: {len(fake_reservoir)}, Real: {len(real_reservoir)})")
 
-        if len(fake_samples) >= per_class and len(real_samples) >= per_class:
+        if total_seen >= scan_limit:
             break
 
-        if total_seen > (per_class + skip_per_class) * 20:
-            break
-
-    print(f"    Collected: {len(fake_samples)} fake, {len(real_samples)} real "
+    print(f"    Collected: {len(fake_reservoir)} fake, {len(real_reservoir)} real "
           f"(scanned {total_seen}, skipped {fake_skipped}+{real_skipped})")
-    return fake_samples + real_samples
+    return fake_reservoir + real_reservoir
 
 
 def load_portrait_dataset(max_samples=4000, train_split=0.85, face_align=True,
