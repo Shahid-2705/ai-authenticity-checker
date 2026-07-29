@@ -35,13 +35,13 @@ from training.dataset_portraits import (
 )
 
 # -------- CONFIG --------
-BATCH_SIZE = 16
-EPOCHS = 20
+BATCH_SIZE = 32
+EPOCHS = 25
 LR = 1e-3
-MAX_SAMPLES = 20000
+MAX_SAMPLES = 16000
 TRAIN_SPLIT = 0.85
 MODEL_PATH = "models/frequency.pth"
-EARLY_STOPPING_PATIENCE = 5
+EARLY_STOPPING_PATIENCE = 7
 LABEL_SMOOTHING = 0.05
 # -------------------------
 

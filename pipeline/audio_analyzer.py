@@ -95,6 +95,7 @@ def generate_mel_spectrogram(waveform, sr=SAMPLE_RATE):
             mel_db,
             ((0, 0), (0, MAX_TIME_STEPS - mel_db.shape[1])),
             mode="constant",
+            constant_values=-80.0,
         )
     else:
         mel_db = mel_db[:, :MAX_TIME_STEPS]
@@ -110,8 +111,10 @@ def preprocess_audio(waveform, sr=SAMPLE_RATE):
         torch tensor of shape (1, 1, 91, 150)
     """
     mel_db = generate_mel_spectrogram(waveform, sr)
+    # Normalize dB range [-80, 0] to [0, 1]
+    mel_norm = (mel_db + 80.0) / 80.0
     # Add batch and channel dims: (1, 1, 91, 150)
-    tensor = torch.tensor(mel_db, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+    tensor = torch.tensor(mel_norm, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
     return tensor
 
 

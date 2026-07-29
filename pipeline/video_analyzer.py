@@ -66,23 +66,37 @@ class VideoLoader:
             "duration_sec": round(self.duration, 2),
         }
 
-    def extract_frames(self, sampling_fps=6):
+    def extract_frames(self, sampling_fps=6, max_frames=0):
         """
         Generator yielding (index, PIL.Image, timestamp).
 
         Args:
             sampling_fps: How many frames per second to sample.
                           Default 6 means ~every 5th frame of a 30fps video.
+            max_frames: Maximum number of frames to yield (0 = no limit).
+                        When set, frames are evenly spaced across the video.
         """
         cap = cv2.VideoCapture(self.video_path)
         if not cap.isOpened():
             return
 
         skip = max(1, int(self.fps / sampling_fps))
+
+        # If max_frames is set and the estimated frame count exceeds it,
+        # increase the skip interval so frames are evenly spread across
+        # the full video duration.
+        if max_frames > 0:
+            estimated_sampled = self.frame_count // skip
+            if estimated_sampled > max_frames:
+                skip = max(1, self.frame_count // max_frames)
+
         frame_idx = 0
         extracted = 0
 
         while True:
+            if max_frames > 0 and extracted >= max_frames:
+                break
+
             ret, frame = cap.read()
             if not ret:
                 break
@@ -548,8 +562,9 @@ class ModelEnsemble:
             eff_for_fusion = texture_prob if self.texture_model is not None else eff_prob
             if self.texture_model is not None or self.eff_model is not None:
                 eff_cal = _calibrate(eff_for_fusion)
-                weighted_sum += w["efficientnet"] * eff_cal
-                total_weight += w["efficientnet"]
+                eff_w = w.get("efficientnet", w.get("texture", 0.15))
+                weighted_sum += eff_w * eff_cal
+                total_weight += eff_w
                 scores_map["efficientnet"] = eff_cal
             if has_face and self.face_model is not None:
                 face_cal = _calibrate(face_prob)
@@ -706,7 +721,7 @@ class VideoAnalyzer:
     def __init__(self, dino_model, eff_model, face_model, device,
                  vit_model=None, vit_processor=None,
                  texture_model=None, freq_cnn=None, fusion_mlp=None,
-                 clip_deepfake=None):
+                 clip_deepfake=None, video_lstm=None):
         self.ensemble = ModelEnsemble(
             dino_model, eff_model, face_model, device,
             vit_model=vit_model, vit_processor=vit_processor,
@@ -715,6 +730,12 @@ class VideoAnalyzer:
         )
         self.face_extractor = FaceExtractor()
         self.temporal = TemporalAnalyzer(window_size=10)
+        self.video_lstm = video_lstm
+
+    # Maximum frames to analyze regardless of FPS — prevents timeouts on
+    # long videos or high FPS settings.  CPU inference is ~13s/frame, so
+    # 32 frames ≈ 7 min worst-case (well within 600s timeout).
+    MAX_FRAMES = 32
 
     def analyze(self, video_path, fps=6, aggregation="weighted_avg",
                 progress_callback=None):
@@ -734,12 +755,14 @@ class VideoAnalyzer:
         info = loader.info
         self.temporal.reset()
 
-        est_total = max(1, int(info["duration_sec"] * fps))
+        est_total = min(max(1, int(info["duration_sec"] * fps)), self.MAX_FRAMES)
 
         frame_results = []
         temporal_snapshots = []
 
-        for frame_idx, pil_img, timestamp in loader.extract_frames(sampling_fps=fps):
+        for frame_idx, pil_img, timestamp in loader.extract_frames(
+            sampling_fps=fps, max_frames=self.MAX_FRAMES,
+        ):
             if progress_callback:
                 progress_callback(
                     frame_idx + 1, est_total,
@@ -783,6 +806,18 @@ class VideoAnalyzer:
             frame_results, aggregation
         )
 
+        # Blend LSTM temporal risk when available
+        video_lstm_risk = None
+        if self.video_lstm is not None:
+            try:
+                lstm_risk = self.video_lstm.predict_window(frame_results)
+                video_lstm_risk = lstm_risk
+                avg_risk = 0.5 * avg_risk + 0.5 * lstm_risk
+                prediction = "FAKE" if avg_risk > 0.5 else "REAL"
+                confidence = abs(2 * avg_risk - 1)
+            except (RuntimeError, ValueError, TypeError):
+                pass
+
         # Final temporal summary (from last window)
         final_temporal = temporal_snapshots[-1] if temporal_snapshots else {}
 
@@ -796,7 +831,7 @@ class VideoAnalyzer:
         faces_detected = sum(1 for r in frame_results if r["has_face"])
         fake_frames = sum(1 for r in frame_results if r["prediction"] == "FAKE")
 
-        return {
+        result_dict = {
             "prediction": prediction,
             "confidence": round(confidence, 4),
             "avg_risk": round(avg_risk, 4),
@@ -814,6 +849,9 @@ class VideoAnalyzer:
                 "final_window": final_temporal,
             },
         }
+        if video_lstm_risk is not None:
+            result_dict["video_lstm_risk"] = round(video_lstm_risk, 4)
+        return result_dict
 
     def _aggregate(self, frame_results, method):
         """
