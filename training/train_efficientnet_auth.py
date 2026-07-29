@@ -1,6 +1,5 @@
 import sys
 import os
-import random
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
@@ -15,9 +14,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torchvision import transforms
-from datasets import load_dataset
 
 from core_models.efficientnet_auth_model import EfficientNetAuthModel
+from training.dataset_portraits import load_portrait_dataset
 
 # ---------------- CONFIG ----------------
 BATCH_SIZE = 32
@@ -62,63 +61,20 @@ def main():
         )
     ])
 
-    # -------- Load dataset via streaming (balanced, wide reservoir sample) --------
-    # Per-class quota collection that stops as soon as it's met only ever
-    # samples a narrow early slice of the stream (this loop didn't even
-    # shuffle the stream). Train/val split from that narrow slice can look
-    # artificially easy without generalizing. Reservoir sampling
-    # (Algorithm R) over a much longer scan fixes this: each class's final
-    # samples are a uniform random draw from everything seen, not just
-    # whatever appeared first.
-    print("Loading Hugging Face dataset (streaming)...")
-    stream = load_dataset(
-        "Hemg/AI-Generated-vs-Real-Images-Datasets",
-        split="train",
-        streaming=True
-    ).shuffle(seed=42, buffer_size=5000)
-
-    per_class = MAX_SAMPLES // 2
-    scan_limit = per_class * 30
-    print(f"Reservoir-sampling {per_class} per class from up to "
-          f"{scan_limit} streamed samples ({MAX_SAMPLES} total target)...")
-
-    random.seed(42)
-    reservoirs = {0: [], 1: []}  # 0=Real, 1=AI
-    seen_counts = {0: 0, 1: 0}
-    total_seen = 0
-    last_printed = 0
-
-    for sample in stream:
-        label = int(sample["label"])  # 1 = AI, 0 = Real
-        if label not in reservoirs:
-            continue
-
-        seen_counts[label] += 1
-        if len(reservoirs[label]) < per_class:
-            img = sample["image"].convert("RGB")
-            reservoirs[label].append((img, float(label)))
-        else:
-            j = random.randint(0, seen_counts[label] - 1)
-            if j < per_class:
-                img = sample["image"].convert("RGB")
-                reservoirs[label][j] = (img, float(label))
-
-        total_seen += 1
-        if total_seen - last_printed >= 5000:
-            last_printed = total_seen
-            print(f"  scanned {total_seen}/{scan_limit} (Real: {len(reservoirs[0])}, AI: {len(reservoirs[1])})")
-        if total_seen >= scan_limit:
-            break
-
-    samples = reservoirs[0] + reservoirs[1]
-    print(f"Collected {len(samples)} samples (Real: {len(reservoirs[0])}, AI: {len(reservoirs[1])}) from {total_seen} streamed")
-
-    random.shuffle(samples)
-
-    # -------- Train / Val split --------
-    split = int(len(samples) * TRAIN_SPLIT)
-    train_data = samples[:split]
-    val_data = samples[split:]
+    # -------- Load dataset via the shared multi-source loader --------
+    # Now pulls from PORTRAIT_SOURCES (2 GAN-style HF-streaming sources,
+    # reservoir-sampled) PLUS OpenRL/DeepFakeFace (diffusion-generated:
+    # SD Inpainting/text2img, InsightFace) instead of the single
+    # Hemg/AI-Generated-vs-Real-Images-Datasets source used before - that
+    # source alone taught this model nothing about diffusion output.
+    # training/eval_image_benchmark.py found the whole ensemble at 30.8%
+    # accuracy on diffusion fakes vs 83-97% on real photos, and this
+    # model's own average score on that held-out set was just 0.153,
+    # meaning it was still confidently calling diffusion fakes "real."
+    print("Loading portrait dataset (GAN sources + diffusion source)...")
+    train_data, val_data = load_portrait_dataset(
+        max_samples=MAX_SAMPLES, train_split=TRAIN_SPLIT, face_align=False,
+    )
 
     print(f"Train samples: {len(train_data)}")
     print(f"Val samples  : {len(val_data)}")
