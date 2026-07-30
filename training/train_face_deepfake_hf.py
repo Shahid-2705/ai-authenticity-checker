@@ -114,9 +114,15 @@ def main():
     # ensemble at 30.8% accuracy on diffusion fakes vs 83-97% on real
     # photos, and none of this model's prior training data was diffusion-
     # generated at all.
+    # face_align=True (changed from False): InsightFace fakes in
+    # OpenRL/DeepFakeFace turned out to be face-swaps applied directly onto
+    # the SAME real IMDB-WIKI photos used as the real baseline (identical
+    # filenames confirmed in both zips) - only the face region is
+    # manipulated. Training on the whole image diluted that signal with
+    # mostly-real background pixels; cropping to the face isolates it.
     print("Loading portrait dataset (GAN sources + diffusion source)...")
     train_data, val_data = load_portrait_dataset(
-        max_samples=MAX_SAMPLES, train_split=TRAIN_SPLIT, face_align=False,
+        max_samples=MAX_SAMPLES, train_split=TRAIN_SPLIT, face_align=True,
     )
 
     print(f"Train samples: {len(train_data)}")

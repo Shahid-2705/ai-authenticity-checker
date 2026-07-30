@@ -45,11 +45,15 @@ def main():
     # only, which is GAN-style and taught DINOv2 nothing about diffusion
     # output (training/eval_image_benchmark.py found the whole ensemble at
     # 30.8% accuracy on diffusion fakes vs 83.3% on real photos).
-    # face_align=False matches this model's original whole-image (not
-    # face-cropped) training.
+    # face_align=True (changed from False): InsightFace fakes in
+    # OpenRL/DeepFakeFace turned out to be face-swaps applied directly onto
+    # the SAME real IMDB-WIKI photos used as the real baseline (identical
+    # filenames confirmed in both zips) - only the face region is
+    # manipulated. Training on the whole image diluted that signal with
+    # mostly-real background pixels; cropping to the face isolates it.
     print("Loading portrait dataset (GAN sources + diffusion source)...")
     train_samples, val_samples = load_portrait_dataset(
-        max_samples=MAX_SAMPLES, train_split=TRAIN_SPLIT, face_align=False,
+        max_samples=MAX_SAMPLES, train_split=TRAIN_SPLIT, face_align=True,
     )
 
     print(f"Train samples: {len(train_samples)}")

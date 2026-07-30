@@ -3,7 +3,9 @@ models/*.pth
 models/*.keras
 models/*.onnx
 models/*.tflite
+models/*.joblib
 models/face_detector/*.caffemodel
+models/_backup_*/
 
 # HuggingFace cache
 .hf_cache/

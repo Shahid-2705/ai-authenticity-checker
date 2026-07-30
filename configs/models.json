@@ -52,6 +52,14 @@
     "enabled": true,
     "description": "EfficientNetV2-S authentication"
   },
+  "forensic_ml": {
+    "type": "local",
+    "class": "ForensicMLClassifier",
+    "path": "forensic_ml.joblib",
+    "weight": null,
+    "enabled": true,
+    "description": "Classical RandomForest tie-breaker (hand-crafted forensic features), consulted only when fused risk is near the 0.60 decision boundary"
+  },
   "video_lstm": {
     "type": "local",
     "class": "VideoTemporalLSTM",

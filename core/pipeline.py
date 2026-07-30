@@ -58,6 +58,9 @@ class ModelRegistry:
         self.vit_model = None
         self.vit_processor = None
 
+        # Classical ML tie-breaker (RandomForest on hand-crafted features)
+        self.forensic_ml = None
+
         # Analyzers
         self.video_analyzer = None
         self.audio_analyzer = None
@@ -88,6 +91,9 @@ class ModelRegistry:
 
         # HuggingFace ViT
         self._try_load_vit()
+
+        # Classical ML tie-breaker
+        self._try_load_forensic_ml()
 
         # Frequency analyzer (heuristic fallback)
         try:
@@ -169,6 +175,21 @@ class ModelRegistry:
         except Exception as e:
             logger.warning("Could not load CorefakeNet: %s", e)
             self.missing.append("corefakenet (error)")
+
+    def _try_load_forensic_ml(self) -> None:
+        path = self.config.models_dir / "forensic_ml.joblib"
+        if not path.exists():
+            self.missing.append("forensic_ml")
+            return
+        try:
+            from core_models.forensic_ml import ForensicMLClassifier
+            clf = ForensicMLClassifier()
+            clf.load(str(path))
+            self.forensic_ml = clf
+            self.loaded.append("forensic_ml")
+        except Exception as e:
+            logger.warning("Could not load forensic ML tie-breaker: %s", e)
+            self.missing.append("forensic_ml (error)")
 
     def _try_load_vit(self) -> None:
         try:
@@ -433,6 +454,21 @@ def _analyze_image_ensemble(
             if max_prob > override_thresh:
                 final_risk = max(final_risk, max_prob * 0.9 if n_trained < 3 else max_prob)
 
+    # Classical-ML tie-breaker: hand-crafted forensic features (LBP, color
+    # moments, noise residual, edge density) computed on the whole image,
+    # face crop, and blend-boundary context region. Only consulted when the
+    # fused score is near the decision boundary - training/diagnose_insight.py
+    # found InsightFace-style face-swap-on-real-photo fakes clustering
+    # exactly there (0.38-0.68), a different failure mode than the deep
+    # ensemble being blind to them outright.
+    forensic_ml_score = None
+    if reg.forensic_ml is not None and 0.35 <= final_risk <= 0.75:
+        try:
+            forensic_ml_score = reg.forensic_ml.predict_proba_fake(image_pil)
+            final_risk = 0.7 * final_risk + 0.3 * forensic_ml_score
+        except Exception as e:
+            logger.warning("Forensic ML tie-breaker failed: %s", e)
+
     # Verdict
     risk_pct = final_risk * 100
     verdict = Verdict.from_risk_score(final_risk)
@@ -481,6 +517,7 @@ def _analyze_image_ensemble(
         "model_agreement": model_agreement,
         "model_scores": scores,
         "fusion_mode": fusion_mode,
+        "forensic_ml_score": forensic_ml_score,
         "face_detected": has_face,
         "face_aligned": has_face,
         "gradcam_image": gradcam_img,
