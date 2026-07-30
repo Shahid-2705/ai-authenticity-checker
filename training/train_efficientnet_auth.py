@@ -71,15 +71,19 @@ def main():
     # accuracy on diffusion fakes vs 83-97% on real photos, and this
     # model's own average score on that held-out set was just 0.153,
     # meaning it was still confidently calling diffusion fakes "real."
-    # face_align=True (changed from False): InsightFace fakes in
-    # OpenRL/DeepFakeFace turned out to be face-swaps applied directly onto
-    # the SAME real IMDB-WIKI photos used as the real baseline (identical
-    # filenames confirmed in both zips) - only the face region is
-    # manipulated. Training on the whole image diluted that signal with
-    # mostly-real background pixels; cropping to the face isolates it.
+    # face_align=False: tried True on the theory that InsightFace fakes
+    # (face-swaps onto the same real IMDB-WIKI photos as the real baseline -
+    # see training/diagnose_insight.py) would be easier to catch with a
+    # tight face crop isolating the manipulated region. Measured result was
+    # the opposite: InsightFace accuracy dropped 6.7%->3.3% and inpainting
+    # dropped too (training/eval_image_benchmark.py, round 4 vs round 3) -
+    # a tight crop likely excludes the blend boundary itself, which sits at
+    # the hairline/jaw/neck edge just outside it, and losing the
+    # complementary whole-image signal across 3 of 7 fusion inputs hurt
+    # more than the crop helped. Reverted.
     print("Loading portrait dataset (GAN sources + diffusion source)...")
     train_data, val_data = load_portrait_dataset(
-        max_samples=MAX_SAMPLES, train_split=TRAIN_SPLIT, face_align=True,
+        max_samples=MAX_SAMPLES, train_split=TRAIN_SPLIT, face_align=False,
     )
 
     print(f"Train samples: {len(train_data)}")
