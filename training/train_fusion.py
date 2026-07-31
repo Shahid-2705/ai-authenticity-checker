@@ -243,6 +243,14 @@ def train_fusion(scores, labels, device):
     """
     print("\n--- Training Fusion MLP ---\n")
 
+    # Seeded: previously this had no fixed seed, so the train/val split and
+    # FusionMLP's weight init were drawn fresh from PyTorch's global RNG
+    # every run. Two runs on the IDENTICAL reverted component models landed
+    # 48.3% vs 36.7% on training/eval_image_benchmark.py purely from this
+    # randomness - not a real difference in the underlying models, just
+    # non-reproducible fusion training. Fixed so retrains are comparable.
+    torch.manual_seed(42)
+
     # Train/val split
     n = len(scores)
     split = int(n * 0.8)
