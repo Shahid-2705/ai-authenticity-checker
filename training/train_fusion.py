@@ -60,6 +60,7 @@ N_INPUTS = 7
 MAX_SAMPLES = 2000          # Held-out set for fusion training
 MODEL_PATH = "models/fusion_mlp.pth"
 MODELS_DIR = "models"
+CHECKPOINT_PATH = os.path.join(ROOT_DIR, ".hf_cache", "fusion_collect_checkpoint.pt")
 # -------------------------
 
 
@@ -131,12 +132,27 @@ def collect_predictions(device):
 
     val_transform = VAL_TRANSFORM
 
+    # Checkpointed: this loop runs every trained model on ~2000 images on
+    # CPU (~20+ min) and has been getting killed by something outside this
+    # script partway through on repeated attempts, losing all progress each
+    # time. val_data's order is fully deterministic (fixed seeds throughout
+    # dataset_portraits.py's collection), so resuming at the same index on
+    # restart is safe - it's the same image every time.
     all_scores = []
     all_labels = []
+    start_idx = 0
+    if os.path.exists(CHECKPOINT_PATH):
+        ckpt = torch.load(CHECKPOINT_PATH, weights_only=False)
+        all_scores = ckpt["scores"]
+        all_labels = ckpt["labels"]
+        start_idx = len(all_scores)
+        print(f"Resuming from checkpoint: {start_idx}/{len(val_data)} already collected")
 
     print(f"Collecting predictions from {len(val_data)} samples...")
 
-    for img, label in tqdm(val_data, desc="Scoring"):
+    for i in tqdm(range(start_idx, len(val_data)), desc="Scoring",
+                  initial=start_idx, total=len(val_data)):
+        img, label = val_data[i]
         # Order matches FusionMLP.MODEL_NAMES
         scores = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
@@ -218,8 +234,17 @@ def collect_predictions(device):
         all_scores.append(scores)
         all_labels.append(float(label))
 
+        if (i + 1) % 100 == 0:
+            torch.save({"scores": all_scores, "labels": all_labels}, CHECKPOINT_PATH)
+
     scores_tensor = torch.tensor(all_scores, dtype=torch.float32)
     labels_tensor = torch.tensor(all_labels, dtype=torch.float32)
+
+    # Collection finished cleanly - clear the checkpoint so a genuinely
+    # fresh run (e.g. after swapping in different component models) doesn't
+    # accidentally resume stale scores computed against the old ones.
+    if os.path.exists(CHECKPOINT_PATH):
+        os.remove(CHECKPOINT_PATH)
 
     print(f"\nCollected {len(all_scores)} prediction vectors")
     names = FusionMLP.MODEL_NAMES
