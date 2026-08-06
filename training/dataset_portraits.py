@@ -96,6 +96,22 @@ DEEPFAKEFACE_IMG_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 DEEPFAKEFACE_BENCHMARK_SEED = 42
 DEEPFAKEFACE_BENCHMARK_HOLDOUT = 30
 
+# -------- Face-morph source (fake-only, no bona-fide images bundled) --------
+# 2026-08-06 manual testing (test_examples/manual_checks/) found the whole
+# ensemble missing 7/9 "morphy_me"/"dream.film"-style face-morph/face-average
+# AI images — a category none of the sources above represent: they're not
+# diffusion synthesis, not GAN synthesis, not a graft/face-swap onto one real
+# photo, but a smooth blend of features from multiple real faces. This is the
+# exact academic category "face morphing attack detection" research covers.
+# DiM-FRLL-Morphs: diffusion-based morphs (DiM/Fast-DiM/Greedy-DiM algorithms)
+# built from the FRLL research-consented face dataset, CC-BY-SA-4.0, ungated.
+FACEMORPH_REPO = "zblasingame/DiM-FRLL-Morphs"
+FACEMORPH_SPLIT = "train"
+FACEMORPH_IMAGE_COL = "image"
+# ~1.1s/file measured (see collect_facemorphs) - keeps runtime bounded to a
+# few minutes and stays well clear of the ~1,500-file quota wall.
+FACEMORPH_MAX_SAMPLES = 300
+
 
 def _try_detect_face_crop(pil_img, expand_ratio=0.3):
     """
@@ -298,6 +314,63 @@ def collect_from_deepfakeface(per_class, face_align=True, skip_per_class=0):
     return [(img, 1) for img in fake_images] + [(img, 0) for img in real_images]
 
 
+def collect_facemorphs(n_samples, face_align=True, skip=0):
+    """
+    Collect n_samples face-morph images from FACEMORPH_REPO. Every row in
+    this dataset is a morph (fake) - there's no bona-fide/real class bundled
+    in, so this only ever returns label=1 samples.
+
+    Downloads ONLY the specific files needed, not the whole 3,000-file
+    dataset: this repo's storage backend hits a hard download quota around
+    ~1,500 files per session even when authenticated (measured: two
+    separate full-dataset attempts both stalled at exactly the same ~50%
+    mark, which is a quota wall, not transient rate-limiting - retries with
+    backoff don't help). list_repo_files() is a single cheap API call, then
+    we pick a random n_samples of them and fetch just those individually.
+
+    n_samples is capped at FACEMORPH_MAX_SAMPLES regardless of what's
+    requested: measured ~1.1s/file (same overhead whether streamed, bulk-
+    downloaded, or fetched individually - it's inherent to this dataset's
+    storage backend), so requesting anywhere near per_class values like
+    Frequency CNN's ~2666 would take ~50 min and risk the quota wall again.
+    This is meant as supplementary enrichment for one specific blind spot,
+    not primary data volume, so a few hundred images is enough either way.
+    """
+    from huggingface_hub import HfApi, hf_hub_download
+
+    n_samples = min(n_samples, FACEMORPH_MAX_SAMPLES)
+
+    print(f"  Loading {FACEMORPH_REPO} (face-morph attack detection data)...")
+    try:
+        all_files = [
+            f for f in HfApi().list_repo_files(FACEMORPH_REPO, repo_type="dataset")
+            if f.lower().endswith(".png")
+        ]
+    except Exception as e:
+        print(f"  WARNING: Could not list files for {FACEMORPH_REPO}: {e}")
+        return []
+
+    random.seed(42)
+    random.shuffle(all_files)
+    chosen = all_files[skip:skip + n_samples]
+
+    images = []
+    for fname in chosen:
+        try:
+            path = hf_hub_download(
+                repo_id=FACEMORPH_REPO, repo_type="dataset", filename=fname,
+            )
+            img = Image.open(path).convert("RGB")
+        except Exception:
+            continue
+        if face_align:
+            img = _try_detect_face_crop(img)
+        images.append(img)
+
+    print(f"    Collected: {len(images)} face-morph fakes from {FACEMORPH_REPO}")
+    return [(img, 1) for img in images]
+
+
 def load_portrait_dataset(max_samples=4000, train_split=0.85, face_align=True,
                           skip_per_class=0, seed=42):
     """
@@ -315,12 +388,18 @@ def load_portrait_dataset(max_samples=4000, train_split=0.85, face_align=True,
         (train_samples, val_samples) — each is list of (PIL.Image, label)
         label: 0=real, 1=fake (AI-generated)
     """
+    # DiM-FRLL-Morphs isn't counted in n_sources: it's fake-only, so it never
+    # competes with the real-image budget - it just enriches the fake pool's
+    # diversity before the balance step below caps both classes to
+    # whichever is smaller. Counting it here would needlessly shrink
+    # per_class for the 3 sources that actually supply real images.
     n_sources = len(PORTRAIT_SOURCES) + 1  # +1 for DeepFakeFace (diffusion)
     per_source = max_samples // n_sources
     per_class = per_source // 2
 
     print(f"Loading portrait dataset: {max_samples} target samples from "
-          f"{n_sources} sources ({per_class} per class per source)"
+          f"{n_sources} real+fake sources + 1 fake-only source "
+          f"({per_class} per class per source)"
           + (f", skipping {skip_per_class}/class/source" if skip_per_class else ""))
 
     all_samples = []
@@ -335,6 +414,13 @@ def load_portrait_dataset(max_samples=4000, train_split=0.85, face_align=True,
         collect_from_deepfakeface(
             per_class, face_align=face_align, skip_per_class=skip_per_class,
         )
+    )
+
+    # Fake-only supplementary source (no real/bona-fide images bundled in,
+    # so it only ever adds to the fake pool - the balance step below caps
+    # both classes to whichever is smaller either way).
+    all_samples.extend(
+        collect_facemorphs(per_class, face_align=face_align, skip=skip_per_class)
     )
 
     # Balance classes

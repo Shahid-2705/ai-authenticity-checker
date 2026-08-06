@@ -51,3 +51,6 @@ test_image.jpg
 
 # Local scan history (churns constantly, not meant to be shared)
 proofyx_history.db
+
+# Manual test examples (may include personal photos, kept local only)
+test_examples/
