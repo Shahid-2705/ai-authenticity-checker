@@ -17,7 +17,7 @@ jobs:
       - name: Install ruff
         run: pip install ruff
       - name: Lint
-        run: ruff check . --select E,F,W
+        run: ruff check .
 
   test:
     runs-on: ubuntu-latest

@@ -19,9 +19,7 @@ from PIL import Image
 from torchvision import transforms
 from collections import deque
 
-from pipeline.face_gate import face_present
-from core_models.frequency_cnn import FrequencyCNN, fft_to_tensor
-from core_models.fusion_mlp import FusionMLP
+from core_models.frequency_cnn import fft_to_tensor
 from core.pipeline import calibrate_score, forensic_score as _core_forensic_score
 
 

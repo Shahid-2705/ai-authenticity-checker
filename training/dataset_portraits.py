@@ -33,7 +33,7 @@ os.environ.setdefault("HF_DATASETS_CACHE", os.path.join(ROOT_DIR, ".hf_cache", "
 from io import BytesIO
 
 import torch
-from PIL import Image
+from PIL import Image, ImageFilter
 from torch.utils.data import Dataset
 from torchvision import transforms
 from datasets import load_dataset
