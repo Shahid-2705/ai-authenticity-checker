@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 from torchvision.models import efficientnet_b0
 

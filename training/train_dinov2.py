@@ -26,7 +26,7 @@ EPOCHS = 15
 BACKBONE_LR = 1e-5
 HEAD_LR = 1e-3
 TRAIN_SPLIT = 0.85
-MAX_SAMPLES = 2000
+MAX_SAMPLES = 20000
 EARLY_STOPPING_PATIENCE = 5
 LABEL_SMOOTHING = 0.05
 MODEL_PATH = "models/dinov2_auth_model.pth"
@@ -38,16 +38,25 @@ def main():
     print("Using device:", device)
 
     # -------- Load dataset via the shared multi-source loader --------
-    # Now pulls from PORTRAIT_SOURCES (StyleGAN/GAN portraits, 2 HF-streaming
-    # sources with reservoir sampling) PLUS OpenRL/DeepFakeFace (diffusion-
-    # generated: SD Inpainting/text2img, InsightFace) — previously this
-    # trained on the single Hemg/AI-Generated-vs-Real-Images-Datasets source
-    # only, which is GAN-style and taught DINOv2 nothing about diffusion
-    # output (training/eval_image_benchmark.py found the whole ensemble at
-    # 30.8% accuracy on diffusion fakes vs 83.3% on real photos).
-    # face_align=False matches this model's original whole-image (not
-    # face-cropped) training.
-    print("Loading portrait dataset (GAN sources + diffusion source)...")
+    # Now pulls from PORTRAIT_SOURCES (StyleGAN/GAN portraits, many HF-
+    # streaming sources with reservoir sampling) PLUS OpenRL/DeepFakeFace
+    # (diffusion-generated: SD Inpainting/text2img, InsightFace) —
+    # previously this trained on the single
+    # Hemg/AI-Generated-vs-Real-Images-Datasets source only, which is
+    # GAN-style and taught DINOv2 nothing about diffusion output
+    # (training/eval_image_benchmark.py found the whole ensemble at 30.8%
+    # accuracy on diffusion fakes vs 83.3% on real photos).
+    # face_align=False: tried True on the theory that InsightFace fakes
+    # (face-swaps onto the same real IMDB-WIKI photos as the real baseline -
+    # see training/diagnose_insight.py) would be easier to catch with a
+    # tight face crop isolating the manipulated region. Measured result was
+    # the opposite: InsightFace accuracy dropped 6.7%->3.3% and inpainting
+    # dropped too (training/eval_image_benchmark.py, round 4 vs round 3) -
+    # a tight crop likely excludes the blend boundary itself, which sits at
+    # the hairline/jaw/neck edge just outside it, and losing the
+    # complementary whole-image signal across 3 of 7 fusion inputs hurt
+    # more than the crop helped. Reverted.
+    print(f"Loading multi-source portrait dataset ({MAX_SAMPLES} samples)...")
     train_samples, val_samples = load_portrait_dataset(
         max_samples=MAX_SAMPLES, train_split=TRAIN_SPLIT, face_align=False,
     )
@@ -62,7 +71,6 @@ def main():
         num_workers=0,
         pin_memory=True
     )
-
     val_loader = DataLoader(
         PortraitDataset(val_samples, transform=VAL_TRANSFORM),
         batch_size=BATCH_SIZE,
@@ -70,13 +78,6 @@ def main():
         num_workers=0,
         pin_memory=True
     )
-
-    # -------- Class weighting --------
-    labels = [s[1] for s in train_samples]
-    real_count = labels.count(0)
-    ai_count = labels.count(1)
-
-    print(f"Class balance -> Real: {real_count}, AI: {ai_count}")
 
     # -------- Model --------
     model = DINOv2AuthModel().to(device)

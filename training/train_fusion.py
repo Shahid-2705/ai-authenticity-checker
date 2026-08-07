@@ -60,6 +60,7 @@ N_INPUTS = 7
 MAX_SAMPLES = 2000          # Held-out set for fusion training
 MODEL_PATH = "models/fusion_mlp.pth"
 MODELS_DIR = "models"
+CHECKPOINT_PATH = os.path.join(ROOT_DIR, ".hf_cache", "fusion_collect_checkpoint.pt")
 # -------------------------
 
 
@@ -72,7 +73,7 @@ def _load_vit(device):
         processor = ViTImageProcessor.from_pretrained(model_id)
         model.eval()
         return model, processor
-    except Exception as e:
+    except Exception as e:  # Broad catch: HF model loading can fail in many ways
         print(f"WARNING: Could not load ViT: {e}")
         return None, None
 
@@ -113,13 +114,13 @@ def collect_predictions(device):
     face_model = _load_component(device, FaceDeepfakeModel, "image_face_model.pth", "face")
 
     # Load dataset — skip samples used by component models to avoid data leakage.
-    # dataset_portraits.py now has 2 sources (JamieWithofs was dropped for
+    # dataset_portraits.py now has many sources (JamieWithofs was dropped for
     # being unreliable). Component model consumption per class per source:
     #   EfficientNet texture: MAX_SAMPLES=3000 -> 750/class/source
-    #   Frequency CNN:        MAX_SAMPLES=16000 -> 4000/class/source
-    # Skip past the larger of the two (4000) so neither model's training
-    # data leaks into fusion's "held-out" set. DINOv2/EfficientNet Auth/Face
-    # were trained on entirely separate HF streams (not dataset_portraits.py),
+    #   Frequency CNN:        MAX_SAMPLES=20000 -> 5000/class/source
+    # Skip past the larger of the two so neither model's training data leaks
+    # into fusion's "held-out" set. DINOv2/EfficientNet Auth/Face were
+    # trained on entirely separate HF streams (not dataset_portraits.py),
     # so no additional skip is needed for them.
     val_data, _ = load_portrait_dataset(
         max_samples=MAX_SAMPLES,
@@ -131,12 +132,27 @@ def collect_predictions(device):
 
     val_transform = VAL_TRANSFORM
 
+    # Checkpointed: this loop runs every trained model on ~2000 images on
+    # CPU (~20+ min) and has been getting killed by something outside this
+    # script partway through on repeated attempts, losing all progress each
+    # time. val_data's order is fully deterministic (fixed seeds throughout
+    # dataset_portraits.py's collection), so resuming at the same index on
+    # restart is safe - it's the same image every time.
     all_scores = []
     all_labels = []
+    start_idx = 0
+    if os.path.exists(CHECKPOINT_PATH):
+        ckpt = torch.load(CHECKPOINT_PATH, weights_only=False)
+        all_scores = ckpt["scores"]
+        all_labels = ckpt["labels"]
+        start_idx = len(all_scores)
+        print(f"Resuming from checkpoint: {start_idx}/{len(val_data)} already collected")
 
     print(f"Collecting predictions from {len(val_data)} samples...")
 
-    for img, label in tqdm(val_data, desc="Scoring"):
+    for i in tqdm(range(start_idx, len(val_data)), desc="Scoring",
+                  initial=start_idx, total=len(val_data)):
+        img, label = val_data[i]
         # Order matches FusionMLP.MODEL_NAMES
         scores = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
@@ -157,7 +173,7 @@ def collect_predictions(device):
                         probs[0][fake_idx[0]].item()
                         if fake_idx else probs[0][1].item()
                     )
-            except Exception:
+            except Exception:  # Broad catch: ViT inference varies across image inputs
                 pass
 
         # Shared 224x224 tensor for texture/dino/efficientnet_auth/face
@@ -171,14 +187,14 @@ def collect_predictions(device):
             try:
                 with torch.no_grad():
                     scores[1] = texture_model(tensor).item()
-            except Exception:
+            except Exception:  # Broad catch: model can fail on edge-case images
                 pass
 
         # Forensic score (heuristic — kept as input feature)
         try:
-            from app import forensic_score
+            from core.pipeline import forensic_score
             scores[2] = forensic_score(img)
-        except Exception:
+        except Exception:  # Broad catch: forensic heuristic may fail on unusual images
             scores[2] = 0.0
 
         # Frequency CNN score
@@ -187,7 +203,7 @@ def collect_predictions(device):
                 fft_tensor = fft_to_tensor(img).unsqueeze(0).to(device)
                 with torch.no_grad():
                     scores[3] = freq_model(fft_tensor).item()
-            except Exception:
+            except Exception:  # Broad catch: FFT can fail on edge-case images
                 pass
 
         # DINOv2 score
@@ -195,7 +211,7 @@ def collect_predictions(device):
             try:
                 with torch.no_grad():
                     scores[4] = dino_model(tensor).item()
-            except Exception:
+            except Exception:  # Broad catch: DINO can fail on edge-case images
                 pass
 
         # EfficientNet Auth score
@@ -203,7 +219,7 @@ def collect_predictions(device):
             try:
                 with torch.no_grad():
                     scores[5] = eff_auth_model(tensor).item()
-            except Exception:
+            except Exception:  # Broad catch: model can fail on edge-case images
                 pass
 
         # Face Deepfake score (model outputs P(real); fusion wants P(fake))
@@ -212,14 +228,23 @@ def collect_predictions(device):
                 with torch.no_grad():
                     real_prob = face_model(tensor).item()
                     scores[6] = 1.0 - real_prob
-            except Exception:
+            except Exception:  # Broad catch: face model can fail on non-face images
                 pass
 
         all_scores.append(scores)
         all_labels.append(float(label))
 
+        if (i + 1) % 100 == 0:
+            torch.save({"scores": all_scores, "labels": all_labels}, CHECKPOINT_PATH)
+
     scores_tensor = torch.tensor(all_scores, dtype=torch.float32)
     labels_tensor = torch.tensor(all_labels, dtype=torch.float32)
+
+    # Collection finished cleanly - clear the checkpoint so a genuinely
+    # fresh run (e.g. after swapping in different component models) doesn't
+    # accidentally resume stale scores computed against the old ones.
+    if os.path.exists(CHECKPOINT_PATH):
+        os.remove(CHECKPOINT_PATH)
 
     print(f"\nCollected {len(all_scores)} prediction vectors")
     names = FusionMLP.MODEL_NAMES
@@ -242,6 +267,14 @@ def train_fusion(scores, labels, device):
         labels: (N,) ground truth (0=real, 1=fake)
     """
     print("\n--- Training Fusion MLP ---\n")
+
+    # Seeded: previously this had no fixed seed, so the train/val split and
+    # FusionMLP's weight init were drawn fresh from PyTorch's global RNG
+    # every run. Two runs on the IDENTICAL reverted component models landed
+    # 48.3% vs 36.7% on training/eval_image_benchmark.py purely from this
+    # randomness - not a real difference in the underlying models, just
+    # non-reproducible fusion training. Fixed so retrains are comparable.
+    torch.manual_seed(42)
 
     # Train/val split
     n = len(scores)

@@ -22,7 +22,6 @@ if ROOT_DIR not in sys.path:
 
 import torch
 import librosa
-import soundfile as sf
 
 from core_models.audio_deepfake_model import AudioDeepfakeCNN
 
@@ -89,7 +88,9 @@ def generate_mel_spectrogram(waveform, sr=SAMPLE_RATE):
     )
     mel_db = librosa.power_to_db(mel, ref=np.max)
 
-    # Pad or truncate to fixed width
+    # Pad or truncate to fixed width. Pad with -80 dB (silence floor, since
+    # power_to_db(ref=np.max) puts the loudest frame at 0 dB) rather than
+    # the implicit 0 fill, which would represent peak loudness instead.
     if mel_db.shape[1] < MAX_TIME_STEPS:
         mel_db = np.pad(
             mel_db,
@@ -111,7 +112,10 @@ def preprocess_audio(waveform, sr=SAMPLE_RATE):
         torch tensor of shape (1, 1, 91, 150)
     """
     mel_db = generate_mel_spectrogram(waveform, sr)
-    # Normalize dB range [-80, 0] to [0, 1]
+    # Normalize dB range [-80, 0] to [0, 1] before feeding the CNN. The
+    # model has no BatchNorm layers, and raw dB-scale input (magnitude
+    # ~40-80) caused dead ReLUs / no learning during training - must match
+    # the same normalization used in training/train_audio_deepfake.py.
     mel_norm = (mel_db + 80.0) / 80.0
     # Add batch and channel dims: (1, 1, 91, 150)
     tensor = torch.tensor(mel_norm, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
@@ -177,7 +181,6 @@ def analyze_spectral_artifacts(mel_db):
     scores = {}
 
     # 1. Harmonic regularity — check variance across mel bands
-    band_means = mel_db.mean(axis=1)  # (91,)
     band_stds = mel_db.std(axis=1)
 
     # AI vocoders produce very uniform energy across time in each band
@@ -376,8 +379,14 @@ class AudioAnalyzer:
 
             mel_db = generate_mel_spectrogram(seg_wave, sr)
 
+            # Normalize dB range [-80, 0] to [0, 1] (the model has no
+            # BatchNorm layers; raw dB-scale input caused dead ReLUs / no
+            # learning during training - must match
+            # training/train_audio_deepfake.py's normalization).
+            # analyze_spectral_artifacts() below still needs raw mel_db.
+            mel_norm = (mel_db + 80.0) / 80.0
             tensor = torch.tensor(
-                mel_db, dtype=torch.float32
+                mel_norm, dtype=torch.float32
             ).unsqueeze(0).unsqueeze(0).to(self.device)
 
             with torch.no_grad():

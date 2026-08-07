@@ -3,7 +3,9 @@ models/*.pth
 models/*.keras
 models/*.onnx
 models/*.tflite
+models/*.joblib
 models/face_detector/*.caffemodel
+models/_backup_*/
 
 # HuggingFace cache
 .hf_cache/
@@ -53,3 +55,6 @@ nul
 # Test fixtures in root
 test_image.jpg
 dummy.mp4
+
+# Manual test examples (may include personal photos, kept local only)
+test_examples/

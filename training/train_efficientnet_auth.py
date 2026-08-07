@@ -1,6 +1,5 @@
 import sys
 import os
-import random
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
@@ -15,9 +14,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torchvision import transforms
-from datasets import load_dataset
 
 from core_models.efficientnet_auth_model import EfficientNetAuthModel
+from training.dataset_portraits import load_portrait_dataset, PortraitDataset
 
 # ---------------- CONFIG ----------------
 BATCH_SIZE = 32
@@ -25,7 +24,7 @@ EPOCHS = 15
 BACKBONE_LR = 1e-5
 HEAD_LR = 1e-3
 TRAIN_SPLIT = 0.85
-MAX_SAMPLES = 2000           # CPU-practical training
+MAX_SAMPLES = 20000          # 10x increase for meaningful training
 MODEL_PATH = "models/efficientnet_auth_model.pth"
 EARLY_STOPPING_PATIENCE = 5
 LABEL_SMOOTHING = 0.05
@@ -62,95 +61,41 @@ def main():
         )
     ])
 
-    # -------- Load dataset via streaming (balanced, wide reservoir sample) --------
-    # Per-class quota collection that stops as soon as it's met only ever
-    # samples a narrow early slice of the stream (this loop didn't even
-    # shuffle the stream). Train/val split from that narrow slice can look
-    # artificially easy without generalizing. Reservoir sampling
-    # (Algorithm R) over a much longer scan fixes this: each class's final
-    # samples are a uniform random draw from everything seen, not just
-    # whatever appeared first.
-    print("Loading Hugging Face dataset (streaming)...")
-    stream = load_dataset(
-        "Hemg/AI-Generated-vs-Real-Images-Datasets",
-        split="train",
-        streaming=True
-    ).shuffle(seed=42, buffer_size=5000)
-
-    per_class = MAX_SAMPLES // 2
-    scan_limit = per_class * 30
-    print(f"Reservoir-sampling {per_class} per class from up to "
-          f"{scan_limit} streamed samples ({MAX_SAMPLES} total target)...")
-
-    random.seed(42)
-    reservoirs = {0: [], 1: []}  # 0=Real, 1=AI
-    seen_counts = {0: 0, 1: 0}
-    total_seen = 0
-    last_printed = 0
-
-    for sample in stream:
-        label = int(sample["label"])  # 1 = AI, 0 = Real
-        if label not in reservoirs:
-            continue
-
-        seen_counts[label] += 1
-        if len(reservoirs[label]) < per_class:
-            img = sample["image"].convert("RGB")
-            reservoirs[label].append((img, float(label)))
-        else:
-            j = random.randint(0, seen_counts[label] - 1)
-            if j < per_class:
-                img = sample["image"].convert("RGB")
-                reservoirs[label][j] = (img, float(label))
-
-        total_seen += 1
-        if total_seen - last_printed >= 5000:
-            last_printed = total_seen
-            print(f"  scanned {total_seen}/{scan_limit} (Real: {len(reservoirs[0])}, AI: {len(reservoirs[1])})")
-        if total_seen >= scan_limit:
-            break
-
-    samples = reservoirs[0] + reservoirs[1]
-    print(f"Collected {len(samples)} samples (Real: {len(reservoirs[0])}, AI: {len(reservoirs[1])}) from {total_seen} streamed")
-
-    random.shuffle(samples)
-
-    # -------- Train / Val split --------
-    split = int(len(samples) * TRAIN_SPLIT)
-    train_data = samples[:split]
-    val_data = samples[split:]
+    # -------- Load dataset via the shared multi-source loader --------
+    # Now pulls from PORTRAIT_SOURCES (many GAN/diffusion HF-streaming
+    # sources, reservoir-sampled) PLUS OpenRL/DeepFakeFace (diffusion-
+    # generated: SD Inpainting/text2img, InsightFace) instead of the single
+    # Hemg/AI-Generated-vs-Real-Images-Datasets source used before - that
+    # source alone taught this model nothing about diffusion output.
+    # training/eval_image_benchmark.py found the whole ensemble at 30.8%
+    # accuracy on diffusion fakes vs 83-97% on real photos, and this
+    # model's own average score on that held-out set was just 0.153,
+    # meaning it was still confidently calling diffusion fakes "real."
+    # face_align=False: tried True on the theory that InsightFace fakes
+    # (face-swaps onto the same real IMDB-WIKI photos as the real baseline -
+    # see training/diagnose_insight.py) would be easier to catch with a
+    # tight face crop isolating the manipulated region. Measured result was
+    # the opposite: InsightFace accuracy dropped 6.7%->3.3% and inpainting
+    # dropped too (training/eval_image_benchmark.py, round 4 vs round 3) -
+    # a tight crop likely excludes the blend boundary itself, which sits at
+    # the hairline/jaw/neck edge just outside it, and losing the
+    # complementary whole-image signal across 3 of 7 fusion inputs hurt
+    # more than the crop helped. Reverted.
+    print(f"Loading multi-source portrait dataset ({MAX_SAMPLES} samples)...")
+    train_data, val_data = load_portrait_dataset(
+        max_samples=MAX_SAMPLES, train_split=TRAIN_SPLIT, face_align=False,
+    )
 
     print(f"Train samples: {len(train_data)}")
     print(f"Val samples  : {len(val_data)}")
 
-    # -------- Dataset Wrapper --------
-    class ImageDataset(torch.utils.data.Dataset):
-        def __init__(self, data, tfm):
-            self.data = data
-            self.tfm = tfm
-
-        def __len__(self):
-            return len(self.data)
-
-        def __getitem__(self, idx):
-            img, label = self.data[idx]
-            img = self.tfm(img)
-            return img, torch.tensor(label, dtype=torch.float32)
-
     train_loader = DataLoader(
-        ImageDataset(train_data, train_transform),
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=0,
-        pin_memory=True
+        PortraitDataset(train_data, train_transform),
+        batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=True,
     )
-
     val_loader = DataLoader(
-        ImageDataset(val_data, val_transform),
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        num_workers=0,
-        pin_memory=True
+        PortraitDataset(val_data, val_transform),
+        batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True,
     )
 
     # -------- Model --------

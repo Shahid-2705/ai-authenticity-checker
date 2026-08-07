@@ -8,7 +8,6 @@ Uses the "Quiet Confidence" design system tokens.
 
 from __future__ import annotations
 
-import json
 from html import escape
 from typing import Any, Optional
 
@@ -137,53 +136,38 @@ def generate_score_bars_html(scores_dict: dict[str, float]) -> str:
 # ──────────────────────────────────────────────
 
 def generate_verdict_html(verdict_str: str) -> str:
-    """Minimal verdict badge with SVG icon and 4-tier color system."""
+    """Color-coded verdict badge card with 2-tier system (60% cutoff)."""
     if not verdict_str:
         return ""
 
     upper = verdict_str.upper()
-    if "LIKELY MANIPULATED" in upper:
-        bg = "rgba(239,68,68,0.08)"
-        border = "rgba(239,68,68,0.2)"
-        color = "#EF4444"
-        icon = _ICON_ALERT
-        level = "LIKELY MANIPULATED"
-    elif "POSSIBLY MANIPULATED" in upper:
-        bg = "rgba(234,179,8,0.08)"
-        border = "rgba(234,179,8,0.2)"
-        color = "#EAB308"
-        icon = _ICON_ALERT
-        level = "POSSIBLY MANIPULATED"
-    elif "UNCERTAIN" in upper:
-        bg = "rgba(113,113,122,0.08)"
-        border = "rgba(113,113,122,0.2)"
-        color = "#A1A1AA"
-        icon = _ICON_HELP
+    if "AI-GENERATED" in upper or "AI GENERATED" in upper:
+        bg, border, color = "rgba(236,72,153,0.1)", "rgba(236,72,153,0.3)", "#EC4899"
+        icon = "&#9888;"
+        level = "AI-GENERATED"
+    elif "AUTHENTIC" in upper:
+        bg, border, color = "rgba(16,185,129,0.1)", "rgba(16,185,129,0.3)", "#10B981"
+        icon = "&#10003;"
+        level = "AUTHENTIC"
+    # Legacy fallback (old 4-tier labels / history entries predating this)
+    elif "LIKELY MANIPULATED" in upper or "HIGH" in upper or "CRITICAL" in upper:
+        bg, border, color = "rgba(236,72,153,0.1)", "rgba(236,72,153,0.3)", "#EC4899"
+        icon = "&#9888;"
+        level = "AI-GENERATED"
+    elif "POSSIBLY MANIPULATED" in upper or "MEDIUM" in upper:
+        bg, border, color = "rgba(245,158,11,0.1)", "rgba(245,158,11,0.3)", "#F59E0B"
+        icon = "&#9888;"
         level = "UNCERTAIN"
-    elif "LIKELY AUTHENTIC" in upper:
-        bg = "rgba(34,197,94,0.08)"
-        border = "rgba(34,197,94,0.2)"
-        color = "#22C55E"
-        icon = _ICON_CHECK
-        level = "LIKELY AUTHENTIC"
-    elif "HIGH" in upper or "CRITICAL" in upper:
-        bg = "rgba(239,68,68,0.08)"
-        border = "rgba(239,68,68,0.2)"
-        color = "#EF4444"
-        icon = _ICON_ALERT
-        level = "HIGH RISK"
-    elif "MEDIUM" in upper:
-        bg = "rgba(234,179,8,0.08)"
-        border = "rgba(234,179,8,0.2)"
-        color = "#EAB308"
-        icon = _ICON_ALERT
-        level = "MEDIUM RISK"
+    elif "UNCERTAIN" in upper:
+        bg, border, color = "rgba(148,163,184,0.1)", "rgba(148,163,184,0.3)", "#94A3B8"
+        icon = "&#63;"
+        level = "UNCERTAIN"
     else:
         bg = "rgba(34,197,94,0.08)"
         border = "rgba(34,197,94,0.2)"
         color = "#22C55E"
         icon = _ICON_CHECK
-        level = "LOW RISK"
+        level = "AUTHENTIC"
 
     return f"""
     <div style="padding:14px 16px;border-radius:12px;
@@ -239,27 +223,37 @@ def generate_top_nav(
 # Detection Modules Panel
 # ──────────────────────────────────────────────
 
+# Maps the registry keys used in core/pipeline.py's `self.loaded` list
+# to the display names shown in the sidebar panel.
+_MODEL_KEY_TO_DISPLAY_NAME = {
+    "vit": "ViT Deepfake",
+    "texture": "EfficientNet-B4 Texture",
+    "frequency": "Frequency CNN",
+    "face": "Face Deepfake",
+    "dino": "DINOv2",
+    "efficientnet": "EfficientNet Auth",
+    "fusion": "Fusion MLP",
+    "corefakenet": "CorefakeNet",
+    "audio": "Audio CNN",
+}
+
+
 def generate_modules_panel(
     loaded_models: list[str],
     all_model_names: Optional[list[str]] = None,
 ) -> str:
     """Show loaded model status with minimal indicators."""
     if all_model_names is None:
-        all_model_names = [
-            "ViT Deepfake", "EfficientNet-B4 Texture", "Frequency CNN",
-            "Face Deepfake", "DINOv2", "EfficientNet Auth",
-            "Fusion MLP", "CorefakeNet", "Audio CNN",
-        ]
+        all_model_names = list(_MODEL_KEY_TO_DISPLAY_NAME.values())
 
-    loaded_lower = [m.lower() for m in loaded_models]
+    active_names = {
+        _MODEL_KEY_TO_DISPLAY_NAME[m.lower()]
+        for m in loaded_models
+        if m.lower() in _MODEL_KEY_TO_DISPLAY_NAME
+    }
     items = ""
     for name in all_model_names:
-        is_active = any(
-            keyword in name.lower()
-            for loaded_name in loaded_lower
-            for keyword in loaded_name.split()
-            if len(keyword) > 3
-        ) or name.lower().replace(" ", "") in "".join(loaded_lower).replace(" ", "")
+        is_active = name in active_names
 
         dot_class = "module-dot-active" if is_active else "module-dot-inactive"
         text_color = "#FAFAFA" if is_active else "#52525B"

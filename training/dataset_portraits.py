@@ -2,24 +2,24 @@
 Dataset loader for AI-generated portrait detection.
 
 Streams balanced datasets from HuggingFace:
-  - GAN portraits (StyleGAN, etc.) — PORTRAIT_SOURCES
-  - Diffusion-generated faces (SD Inpainting/text2img, InsightFace) — DeepFakeFace
-  - Real portrait photos
+  - GAN-generated faces (StyleGAN, etc.)
+  - Diffusion-generated images (Stable Diffusion, Midjourney-style, DALL-E) —
+    both via PORTRAIT_SOURCES and the dedicated DeepFakeFace source
+  - Real portrait photos from diverse sources
 
-All images are face-aligned and cropped before being returned.
+All images are optionally face-aligned and cropped before being returned.
 
 Usage:
     from training.dataset_portraits import load_portrait_dataset
 
     train_data, val_data = load_portrait_dataset(
-        max_samples=4000,
+        max_samples=40000,
         train_split=0.85,
     )
 """
 
 import sys
 import os
-import io
 import random
 import zipfile
 
@@ -30,8 +30,10 @@ if ROOT_DIR not in sys.path:
 os.environ.setdefault("HF_HOME", os.path.join(ROOT_DIR, ".hf_cache"))
 os.environ.setdefault("HF_DATASETS_CACHE", os.path.join(ROOT_DIR, ".hf_cache", "datasets"))
 
+from io import BytesIO
+
 import torch
-from PIL import Image
+from PIL import Image, ImageFilter
 from torch.utils.data import Dataset
 from torchvision import transforms
 from datasets import load_dataset
@@ -48,19 +50,25 @@ def _random_jpeg_recompress(img, quality_range=(50, 95), p=0.5):
     if random.random() > p:
         return img
     quality = random.randint(*quality_range)
-    buf = io.BytesIO()
+    buf = BytesIO()
     img.convert("RGB").save(buf, format="JPEG", quality=quality)
     buf.seek(0)
     return Image.open(buf).convert("RGB")
 
 
-# -------- HuggingFace dataset sources --------
-# Each entry: (dataset_id, split, image_col, label_col, fake_label_value)
+# ──────────────────────────────────────────────
+# HuggingFace Dataset Sources
+# ──────────────────────────────────────────────
+# Each entry: dataset_id, split, image_col, label_col, fake_value, real_value
+# Ordered by quality/diversity. Loader tries each source and skips failures.
+#
+# NOTE: JamieWithofs/Deepfake-and-real-images is deliberately excluded here -
+# it returned 0 fake samples out of 20,000+ scanned (streaming shuffle never
+# surfaced any), indicating a broken/unreliable label distribution in this
+# source. upstream/main re-added it independently; dropped again on merge.
+
 PORTRAIT_SOURCES = [
-    # NOTE: JamieWithofs/Deepfake-and-real-images was removed — it returned
-    # 0 fake samples out of 20,000+ scanned (streaming shuffle never surfaced
-    # any), indicating a broken/unreliable label distribution in this source.
-    # AI-Generated vs Real (diverse AI methods)
+    # --- Primary: large, well-labeled datasets ---
     {
         "id": "Hemg/AI-Generated-vs-Real-Images-Datasets",
         "split": "train",
@@ -68,15 +76,106 @@ PORTRAIT_SOURCES = [
         "label_col": "label",
         "fake_value": 1,  # 1=AI, 0=Real
         "real_value": 0,
+        "description": "AI-generated vs real (diverse AI methods)",
     },
-    # 190k deepfake and real images
     {
         "id": "Hemg/deepfake-and-real-images",
         "split": "train",
         "image_col": "image",
         "label_col": "label",
-        "fake_value": 0,  # 0=Fake, 1=Real
+        "fake_value": 0,
         "real_value": 1,
+        "description": "190K deepfake and real images",
+    },
+    # --- Secondary: modern AI generators, diffusion models ---
+    {
+        "id": "poloclub/diffusiondb",
+        "name": "random_1k",
+        "split": "train",
+        "image_col": "image",
+        "label_col": None,   # All images are AI-generated (no label col)
+        "fake_value": None,
+        "real_value": None,
+        "all_fake": True,     # Every image is AI-generated
+        "description": "Stable Diffusion generated images (DiffusionDB)",
+    },
+    {
+        "id": "AIML-TUDA/i_RAVEN",
+        "split": "test",
+        "image_col": "image",
+        "label_col": "label",
+        "fake_value": 1,
+        "real_value": 0,
+        "description": "AI vs real visual patterns",
+    },
+    {
+        "id": "clips/deepfake_detection",
+        "split": "train",
+        "image_col": "image",
+        "label_col": "label",
+        "fake_value": 1,
+        "real_value": 0,
+        "description": "Deepfake detection benchmark",
+    },
+    # --- Modern generators: diffusion, DALL-E, Midjourney ---
+    {
+        "id": "Rajarshi-Roy-research/Defactify_Image_Dataset",
+        "split": "train",
+        "image_col": "Image",
+        "label_col": "Label_A",
+        "fake_value": 1,   # 1=AI-generated, 0=Real
+        "real_value": 0,
+        "description": "96K images: SD2.1, SDXL, SD3, DALL-E 3, Midjourney v6",
+    },
+    {
+        "id": "ComplexDataLab/OpenFake",
+        "name": "core",
+        "split": "train",
+        "image_col": "image",
+        "label_col": "label",
+        "fake_value": "fake",   # string labels
+        "real_value": "real",
+        "description": "2.3M real vs AI-generated (multi-generator, multi-source)",
+    },
+    {
+        "id": "DataScienceProject/Art_Images_Ai_And_Real_",
+        "split": "train",
+        "image_col": "image",
+        "label_col": "label",
+        "fake_value": 0,   # 0=fake, 1=real
+        "real_value": 1,
+        "description": "AI art vs real images (balanced)",
+    },
+    {
+        "id": "ehristoforu/midjourney-images",
+        "split": "train",
+        "image_col": "image",
+        "label_col": None,
+        "fake_value": None,
+        "real_value": None,
+        "all_fake": True,
+        "description": "Midjourney V5/V6 generated images",
+    },
+    # --- Tertiary: additional real-face sources for balance ---
+    {
+        "id": "nielsr/CelebA-faces",
+        "split": "train",
+        "image_col": "image",
+        "label_col": None,
+        "fake_value": None,
+        "real_value": None,
+        "all_real": True,     # Every image is real
+        "description": "CelebA real celebrity faces",
+    },
+    {
+        "id": "logasja/UTKFace",
+        "split": "train",
+        "image_col": "image",
+        "label_col": None,
+        "fake_value": None,
+        "real_value": None,
+        "all_real": True,
+        "description": "UTKFace real faces (diverse demographics)",
     },
 ]
 
@@ -96,6 +195,22 @@ DEEPFAKEFACE_IMG_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 DEEPFAKEFACE_BENCHMARK_SEED = 42
 DEEPFAKEFACE_BENCHMARK_HOLDOUT = 30
 
+# -------- Face-morph source (fake-only, no bona-fide images bundled) --------
+# 2026-08-06 manual testing (test_examples/manual_checks/) found the whole
+# ensemble missing 7/9 "morphy_me"/"dream.film"-style face-morph/face-average
+# AI images — a category none of the sources above represent: they're not
+# diffusion synthesis, not GAN synthesis, not a graft/face-swap onto one real
+# photo, but a smooth blend of features from multiple real faces. This is the
+# exact academic category "face morphing attack detection" research covers.
+# DiM-FRLL-Morphs: diffusion-based morphs (DiM/Fast-DiM/Greedy-DiM algorithms)
+# built from the FRLL research-consented face dataset, CC-BY-SA-4.0, ungated.
+FACEMORPH_REPO = "zblasingame/DiM-FRLL-Morphs"
+FACEMORPH_SPLIT = "train"
+FACEMORPH_IMAGE_COL = "image"
+# ~1.1s/file measured (see collect_facemorphs) - keeps runtime bounded to a
+# few minutes and stays well clear of the ~1,500-file quota wall.
+FACEMORPH_MAX_SAMPLES = 300
+
 
 def _try_detect_face_crop(pil_img, expand_ratio=0.3):
     """
@@ -107,7 +222,7 @@ def _try_detect_face_crop(pil_img, expand_ratio=0.3):
         face_crop, bbox = detect_and_align_face(pil_img, expand_ratio=expand_ratio)
         if face_crop is not None:
             return face_crop
-    except Exception:
+    except Exception:  # Broad catch: face detection can fail in many ways (cv2, PIL, etc.)
         pass
     return pil_img
 
@@ -127,6 +242,11 @@ def collect_from_source(source, per_class, face_align=True, skip_per_class=0,
     same fix already applied to train_dinov2.py, train_efficientnet_auth.py,
     and train_face_deepfake_hf.py).
 
+    Handles three source types:
+      - Standard labeled (fake_value/real_value columns, string or int)
+      - all_fake=True (every image is AI-generated, label=1)
+      - all_real=True (every image is real, label=0)
+
     Args:
         source: dict with dataset config
         per_class: target samples per class
@@ -138,21 +258,28 @@ def collect_from_source(source, per_class, face_align=True, skip_per_class=0,
         scan_multiplier: scan up to (per_class + skip_per_class) * this many
                         samples total
 
-    Returns:
-        list of (PIL.Image, label) where label is 0=real, 1=fake (normalized)
+    Returns list of (PIL.Image, label) where label is 0=real, 1=fake (normalized).
     """
-    print(f"  Loading {source['id']}...")
+    dataset_id = source["id"]
+    print(f"  Loading {dataset_id}...")
     try:
-        stream = load_dataset(
-            source["id"],
-            split=source["split"],
-            streaming=True,
-        ).shuffle(seed=42, buffer_size=10000)
-    except Exception as e:
-        print(f"  WARNING: Could not load {source['id']}: {e}")
+        load_kwargs = {
+            "path": dataset_id,
+            "split": source["split"],
+            "streaming": True,
+        }
+        if "name" in source:
+            load_kwargs["name"] = source["name"]
+        stream = load_dataset(**load_kwargs).shuffle(seed=42, buffer_size=10000)
+    except Exception as e:  # Broad catch: HF dataset loading can fail in many ways
+        print(f"  WARNING: Could not load {dataset_id}: {e}")
         return []
 
     scan_limit = (per_class + skip_per_class) * scan_multiplier
+
+    is_all_fake = source.get("all_fake", False)
+    is_all_real = source.get("all_real", False)
+    label_col = source.get("label_col")
 
     fake_reservoir = []
     real_reservoir = []
@@ -166,10 +293,50 @@ def collect_from_source(source, per_class, face_align=True, skip_per_class=0,
     random.seed(42)
 
     for sample in stream:
-        raw_label = int(sample[source["label_col"]])
         total_seen += 1
 
-        if raw_label == source["fake_value"]:
+        # Determine label
+        if is_all_fake:
+            normalized_label = 1
+        elif is_all_real:
+            normalized_label = 0
+        elif label_col is not None:
+            raw_label = sample[label_col]
+            fake_val = source["fake_value"]
+            real_val = source["real_value"]
+
+            # Support both string labels ("real"/"fake") and int labels (0/1)
+            if isinstance(fake_val, str):
+                raw_str = str(raw_label).lower().strip()
+                if raw_str == fake_val.lower().strip():
+                    normalized_label = 1
+                elif raw_str == real_val.lower().strip():
+                    normalized_label = 0
+                else:
+                    continue
+            else:
+                raw_int = int(raw_label)
+                if raw_int == fake_val:
+                    normalized_label = 1
+                elif raw_int == real_val:
+                    normalized_label = 0
+                else:
+                    continue
+        else:
+            continue
+
+        # Get image
+        img_col = source.get("image_col", "image")
+        try:
+            img = sample[img_col].convert("RGB")
+        except Exception:  # Broad catch: image decoding varies widely across sources
+            continue
+
+        # Minimum size filter — skip tiny images
+        if img.width < 64 or img.height < 64:
+            continue
+
+        if normalized_label == 1:
             if fake_skipped < skip_per_class:
                 fake_skipped += 1
             else:
@@ -182,14 +349,13 @@ def collect_from_source(source, per_class, face_align=True, skip_per_class=0,
                         use_slot = True
                         replace_idx = j
                 if use_slot:
-                    img = sample[source["image_col"]].convert("RGB")
                     if face_align:
                         img = _try_detect_face_crop(img)
                     if replace_idx is None:
                         fake_reservoir.append((img, 1))  # Normalized: 1=fake
                     else:
                         fake_reservoir[replace_idx] = (img, 1)
-        elif raw_label == source["real_value"]:
+        else:
             if real_skipped < skip_per_class:
                 real_skipped += 1
             else:
@@ -202,7 +368,6 @@ def collect_from_source(source, per_class, face_align=True, skip_per_class=0,
                         use_slot = True
                         replace_idx = j
                 if use_slot:
-                    img = sample[source["image_col"]].convert("RGB")
                     if face_align:
                         img = _try_detect_face_crop(img)
                     if replace_idx is None:
@@ -258,7 +423,7 @@ def _sample_deepfakeface_zip(filename, n, skip, face_align):
         for m in chosen:
             try:
                 with zf.open(m) as f:
-                    img = Image.open(io.BytesIO(f.read())).convert("RGB")
+                    img = Image.open(BytesIO(f.read())).convert("RGB")
                 if face_align:
                     img = _try_detect_face_crop(img)
                 images.append(img)
@@ -298,33 +463,109 @@ def collect_from_deepfakeface(per_class, face_align=True, skip_per_class=0):
     return [(img, 1) for img in fake_images] + [(img, 0) for img in real_images]
 
 
-def load_portrait_dataset(max_samples=4000, train_split=0.85, face_align=True,
-                          skip_per_class=0, seed=42):
+def collect_facemorphs(n_samples, face_align=True, skip=0):
+    """
+    Collect n_samples face-morph images from FACEMORPH_REPO. Every row in
+    this dataset is a morph (fake) - there's no bona-fide/real class bundled
+    in, so this only ever returns label=1 samples.
+
+    Downloads ONLY the specific files needed, not the whole 3,000-file
+    dataset: this repo's storage backend hits a hard download quota around
+    ~1,500 files per session even when authenticated (measured: two
+    separate full-dataset attempts both stalled at exactly the same ~50%
+    mark, which is a quota wall, not transient rate-limiting - retries with
+    backoff don't help). list_repo_files() is a single cheap API call, then
+    we pick a random n_samples of them and fetch just those individually.
+
+    n_samples is capped at FACEMORPH_MAX_SAMPLES regardless of what's
+    requested: measured ~1.1s/file (same overhead whether streamed, bulk-
+    downloaded, or fetched individually - it's inherent to this dataset's
+    storage backend), so requesting anywhere near per_class values like
+    Frequency CNN's ~2666 would take ~50 min and risk the quota wall again.
+    This is meant as supplementary enrichment for one specific blind spot,
+    not primary data volume, so a few hundred images is enough either way.
+    """
+    from huggingface_hub import HfApi, hf_hub_download
+
+    n_samples = min(n_samples, FACEMORPH_MAX_SAMPLES)
+
+    print(f"  Loading {FACEMORPH_REPO} (face-morph attack detection data)...")
+    try:
+        all_files = [
+            f for f in HfApi().list_repo_files(FACEMORPH_REPO, repo_type="dataset")
+            if f.lower().endswith(".png")
+        ]
+    except Exception as e:
+        print(f"  WARNING: Could not list files for {FACEMORPH_REPO}: {e}")
+        return []
+
+    random.seed(42)
+    random.shuffle(all_files)
+    chosen = all_files[skip:skip + n_samples]
+
+    images = []
+    for fname in chosen:
+        try:
+            path = hf_hub_download(
+                repo_id=FACEMORPH_REPO, repo_type="dataset", filename=fname,
+            )
+            img = Image.open(path).convert("RGB")
+        except Exception:
+            continue
+        if face_align:
+            img = _try_detect_face_crop(img)
+        images.append(img)
+
+    print(f"    Collected: {len(images)} face-morph fakes from {FACEMORPH_REPO}")
+    return [(img, 1) for img in images]
+
+
+def load_portrait_dataset(max_samples=40000, train_split=0.85, face_align=True,
+                          skip_per_class=0, seed=42, sources=None):
     """
     Load balanced portrait dataset from multiple sources.
 
     Args:
-        max_samples: Total target samples (split across sources)
+        max_samples: Total target samples (split across sources).
+                     Default increased to 40K for meaningful training.
         train_split: Fraction for training
         face_align: Apply face detection and cropping
         skip_per_class: Skip this many samples per class per source before
                         collecting (prevents overlap with other training sets)
         seed: Random seed for shuffling and splitting
+        sources: Optional list of source dicts to use. Defaults to PORTRAIT_SOURCES.
 
     Returns:
-        (train_samples, val_samples) — each is list of (PIL.Image, label)
+        (train_samples, val_samples) -- each is list of (PIL.Image, label)
         label: 0=real, 1=fake (AI-generated)
     """
-    n_sources = len(PORTRAIT_SOURCES) + 1  # +1 for DeepFakeFace (diffusion)
-    per_source = max_samples // n_sources
+    if sources is None:
+        sources = PORTRAIT_SOURCES
+
+    # Filter to labeled sources (have both fake and real, or are marked all_fake/all_real)
+    labeled_sources = [s for s in sources if
+                       s.get("label_col") is not None or
+                       s.get("all_fake") or
+                       s.get("all_real")]
+
+    # DeepFakeFace and DiM-FRLL-Morphs aren't counted in n_sources: DeepFakeFace
+    # is handled separately (zip-based, not HF-streamable) and the face-morph
+    # source is fake-only, so neither competes with the real-image budget -
+    # they just enrich the fake pool's diversity before the balance step below
+    # caps both classes to whichever is smaller. Counting them here would
+    # needlessly shrink per_class for the sources that actually supply real
+    # images.
+    n_sources = len(labeled_sources) + 1  # +1 for DeepFakeFace (diffusion)
+    per_source = max_samples // max(n_sources, 1)
     per_class = per_source // 2
 
     print(f"Loading portrait dataset: {max_samples} target samples from "
-          f"{n_sources} sources ({per_class} per class per source)"
+          f"{len(labeled_sources)} real+fake sources + 1 fake-only source "
+          f"({per_class} per class per source)"
           + (f", skipping {skip_per_class}/class/source" if skip_per_class else ""))
 
     all_samples = []
-    for source in PORTRAIT_SOURCES:
+    for source in labeled_sources:
         samples = collect_from_source(
             source, per_class, face_align=face_align,
             skip_per_class=skip_per_class,
@@ -337,12 +578,22 @@ def load_portrait_dataset(max_samples=4000, train_split=0.85, face_align=True,
         )
     )
 
+    # Fake-only supplementary source (no real/bona-fide images bundled in,
+    # so it only ever adds to the fake pool - the balance step below caps
+    # both classes to whichever is smaller either way).
+    all_samples.extend(
+        collect_facemorphs(per_class, face_align=face_align, skip=skip_per_class)
+    )
+
     # Balance classes
     fake = [s for s in all_samples if s[1] == 1]
     real = [s for s in all_samples if s[1] == 0]
     min_count = min(len(fake), len(real))
     if min_count == 0:
-        raise RuntimeError("No samples collected from any source")
+        raise RuntimeError(
+            f"No balanced samples collected. Fake: {len(fake)}, Real: {len(real)}. "
+            "Check dataset availability and network connection."
+        )
 
     random.seed(seed)
     random.shuffle(fake)
@@ -410,7 +661,64 @@ class PortraitDataset(Dataset):
         return tensor, torch.tensor(label, dtype=torch.float32)
 
 
-# -------- Standard transforms --------
+# ──────────────────────────────────────────────
+# Adversarial Augmentation
+# ──────────────────────────────────────────────
+
+
+def _jpeg_compress(img: Image.Image, quality: int) -> Image.Image:
+    """Simulate JPEG compression at a given quality level."""
+    buf = BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=quality)
+    buf.seek(0)
+    return Image.open(buf).convert("RGB")
+
+
+class AdversarialAugmentation:
+    """
+    Augmentations that simulate real-world degradations adversarial to
+    deepfake detectors: JPEG compression, resize degradation, blur,
+    and social media compression pipelines.
+
+    Applied with probability p (default 0.4) during training.
+    """
+
+    def __init__(self, p: float = 0.4):
+        self.p = p
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        if random.random() > self.p:
+            return img
+
+        aug_type = random.choice(["jpeg", "resize", "blur", "social_media"])
+
+        if aug_type == "jpeg":
+            quality = random.randint(30, 85)
+            return _jpeg_compress(img, quality)
+
+        elif aug_type == "resize":
+            w, h = img.size
+            scale = random.uniform(0.3, 0.7)
+            small = img.resize((int(w * scale), int(h * scale)), Image.BILINEAR)
+            return small.resize((w, h), Image.BILINEAR)
+
+        elif aug_type == "blur":
+            radius = random.uniform(0.5, 2.5)
+            return img.filter(ImageFilter.GaussianBlur(radius=radius))
+
+        else:  # social_media: resize + JPEG combined
+            w, h = img.size
+            scale = random.uniform(0.5, 0.8)
+            small = img.resize((int(w * scale), int(h * scale)), Image.BILINEAR)
+            resized = small.resize((w, h), Image.BILINEAR)
+            quality = random.randint(50, 80)
+            return _jpeg_compress(resized, quality)
+
+
+# ──────────────────────────────────────────────
+# Standard transforms
+# ──────────────────────────────────────────────
+
 TRAIN_TRANSFORM = transforms.Compose([
     transforms.Resize((256, 256)),
     transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
@@ -440,7 +748,7 @@ VAL_TRANSFORM = transforms.Compose([
 
 
 if __name__ == "__main__":
-    train_data, val_data = load_portrait_dataset(max_samples=100, face_align=False)
+    train_data, val_data = load_portrait_dataset(max_samples=200, face_align=False)
     print(f"\nQuick test: {len(train_data)} train, {len(val_data)} val")
     img, label = train_data[0]
     print(f"Sample: {img.size}, label={label}")

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from PIL import Image
-from PIL.ExifTags import TAGS, GPSTAGS
+from PIL.ExifTags import TAGS
 
 from core.types import ExifMetadata
 

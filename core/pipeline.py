@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import math
 import os
-import sys
-import tempfile
 import threading
 import time
 import logging
@@ -26,10 +24,9 @@ from torchvision import transforms
 
 from core.config import get_config
 from core.types import (
-    AnalysisResult, PredictionResult, Verdict, Confidence,
-    RiskLevel, TemporalAnalysis, AudioResult,
+    Verdict, Confidence,
+    RiskLevel, TemporalAnalysis,
 )
-from core.metadata import extract_full_metadata, extract_exif
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +76,9 @@ class ModelRegistry:
         self.vit_model = None
         self.vit_processor = None
 
+        # Classical ML tie-breaker (RandomForest on hand-crafted features)
+        self.forensic_ml = None
+
         # HuggingFace models (new)
         self.wav2vec2_audio = None
         self.clip_deepfake = None
@@ -91,8 +91,6 @@ class ModelRegistry:
         self._load_all()
 
     def _load_all(self) -> None:
-        ROOT_DIR = self.config.models_dir.parent
-
         # Local PyTorch models
         self._try_load("dino", "DINOv2AuthModel",
                        "core_models.dinov2_auth_model", "dinov2_auth_model.pth")
@@ -106,6 +104,8 @@ class ModelRegistry:
                        "core_models.efficientnet_texture", "efficient.pth")
         self._try_load("frequency", "FrequencyCNN",
                        "core_models.frequency_cnn", "frequency.pth")
+        self._try_load("video_lstm", "VideoTemporalLSTM",
+                       "core_models.video_lstm", "video_lstm.pth")
 
         # FusionMLP (special: needs n_inputs arg)
         self._try_load_fusion()
@@ -115,6 +115,9 @@ class ModelRegistry:
 
         # HuggingFace ViT
         self._try_load_vit()
+
+        # Classical ML tie-breaker
+        self._try_load_forensic_ml()
 
         # Wav2Vec2 audio deepfake detector
         self._try_load_wav2vec2_audio()
@@ -203,6 +206,21 @@ class ModelRegistry:
             logger.warning("Could not load CorefakeNet: %s", e)
             self.missing.append("corefakenet (error)")
 
+    def _try_load_forensic_ml(self) -> None:
+        path = self.config.models_dir / "forensic_ml.joblib"
+        if not path.exists():
+            self.missing.append("forensic_ml")
+            return
+        try:
+            from core_models.forensic_ml import ForensicMLClassifier
+            clf = ForensicMLClassifier()
+            clf.load(str(path))
+            self.forensic_ml = clf
+            self.loaded.append("forensic_ml")
+        except Exception as e:
+            logger.warning("Could not load forensic ML tie-breaker: %s", e)
+            self.missing.append("forensic_ml (error)")
+
     def _try_load_vit(self) -> None:
         try:
             from transformers import ViTForImageClassification, ViTImageProcessor
@@ -258,8 +276,8 @@ class ModelRegistry:
                 texture_model=self.models.get("texture"),
                 freq_cnn=self.models.get("frequency"),
                 fusion_mlp=self.models.get("fusion"),
-                clip_deepfake=self.clip_deepfake,
                 video_lstm=self.models.get("video_lstm"),
+                clip_deepfake=self.clip_deepfake,
             )
         except (RuntimeError, FileNotFoundError, ImportError, KeyError) as e:
             logger.warning("Could not init VideoAnalyzer: %s", e)
@@ -380,7 +398,7 @@ def _heuristic_forensic_score(img_pil: Image.Image) -> float:
     ela_score = min(ela_std / 20.0, 1.0)
 
     noise_score = min(max((noise_inconsistency - 0.5) / 0.6, 0.0), 1.0)
-    return 0.6 * noise_score + 0.4 * ela_score
+    return float(0.6 * noise_score + 0.4 * ela_score)
 
 
 # Public alias for backward compatibility (training scripts, tests)
@@ -505,12 +523,12 @@ def _analyze_image_ensemble(
     if fusion_mlp is not None:
         final_risk = fusion_mlp.predict(
             vit=scores.get("vit", 0.0),
-            efficientnet=scores.get("efficientnet", 0.0),
+            texture=scores.get("texture", 0.0),
             forensic=scores.get("forensic", 0.0),
             frequency=scores.get("frequency", 0.0),
-            face=scores.get("face", 0.0),
             dino=scores.get("dino", 0.0),
-            texture=scores.get("texture", 0.0),
+            efficientnet_auth=scores.get("efficientnet", 0.0),
+            face=scores.get("face", 0.0),
         )
         # CLIP is NOT a FusionMLP input (7 fixed inputs) but used as
         # a post-fusion adjustment when CLIP has high confidence
@@ -550,6 +568,21 @@ def _analyze_image_ensemble(
             override_thresh = cal.high_confidence_override if n_trained >= 3 else 0.50
             if max_prob > override_thresh:
                 final_risk = max(final_risk, max_prob * 0.9 if n_trained < 3 else max_prob)
+
+    # Classical-ML tie-breaker: hand-crafted forensic features (LBP, color
+    # moments, noise residual, edge density) computed on the whole image,
+    # face crop, and blend-boundary context region. Only consulted when the
+    # fused score is near the decision boundary - training/diagnose_insight.py
+    # found InsightFace-style face-swap-on-real-photo fakes clustering
+    # exactly there (0.38-0.68), a different failure mode than the deep
+    # ensemble being blind to them outright.
+    forensic_ml_score = None
+    if reg.forensic_ml is not None and 0.35 <= final_risk <= 0.75:
+        try:
+            forensic_ml_score = reg.forensic_ml.predict_proba_fake(image_pil)
+            final_risk = 0.7 * final_risk + 0.3 * forensic_ml_score
+        except Exception as e:
+            logger.warning("Forensic ML tie-breaker failed: %s", e)
 
     # Verdict
     risk_pct = final_risk * 100
@@ -604,6 +637,7 @@ def _analyze_image_ensemble(
         "model_agreement": model_agreement,
         "model_scores": scores,
         "fusion_mode": fusion_mode,
+        "forensic_ml_score": forensic_ml_score,
         "face_detected": has_face,
         "face_aligned": has_face,
         "gradcam_image": gradcam_img,

@@ -16,7 +16,6 @@ Output: P(AI-generated)
 Saves as: models/efficient.pth
 """
 
-import torch
 import torch.nn as nn
 from torchvision.models import efficientnet_b4, EfficientNet_B4_Weights
 

@@ -13,7 +13,6 @@ Usage:
 import sys
 import os
 import time
-import random
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
@@ -27,8 +26,7 @@ import numpy as np
 from torchvision import transforms
 from sklearn.metrics import (
     accuracy_score, roc_auc_score, precision_score,
-    recall_score, f1_score, classification_report,
-    confusion_matrix,
+    recall_score, f1_score, confusion_matrix,
 )
 from tqdm import tqdm
 
@@ -69,7 +67,7 @@ def load_corefakenet(device):
 def load_ensemble(device):
     """Load all ensemble models."""
     from core_models.efficientnet_texture import EfficientNetTexture
-    from core_models.frequency_cnn import FrequencyCNN, fft_to_tensor
+    from core_models.frequency_cnn import FrequencyCNN
     from core_models.fusion_mlp import FusionMLP
     from core_models.dinov2_auth_model import DINOv2AuthModel
     from core_models.efficientnet_auth_model import EfficientNetAuthModel
@@ -317,7 +315,6 @@ def benchmark_speed(model, device, model_type='corefakenet'):
     Returns:
         dict with per_image_ms and estimated video times
     """
-    from core_models.corefakenet import CorefakeNet
 
     if model_type == 'corefakenet':
         dummy = torch.randn(1, 3, 380, 380).to(device)
@@ -437,8 +434,8 @@ def main():
     )
     print(f"Evaluation samples: {len(eval_data)}")
 
-    fake_count = sum(1 for _, l in eval_data if l == 1)
-    real_count = sum(1 for _, l in eval_data if l == 0)
+    fake_count = sum(1 for _, label in eval_data if label == 1)
+    real_count = sum(1 for _, label in eval_data if label == 0)
     print(f"  Fake: {fake_count}, Real: {real_count}")
 
     # ---- Load models ----
@@ -467,12 +464,12 @@ def main():
         print(f"  F1:        {cfn_metrics['f1']:.4f}")
 
         cm = cfn_metrics['confusion_matrix']
-        print(f"\n  Confusion Matrix:")
-        print(f"                  Predicted Real  Predicted Fake")
+        print("\n  Confusion Matrix:")
+        print("                  Predicted Real  Predicted Fake")
         print(f"    Actual Real    {cm[0][0]:>10d}    {cm[0][1]:>10d}")
         print(f"    Actual Fake    {cm[1][0]:>10d}    {cm[1][1]:>10d}")
 
-        print(f"\n  Per-head mean scores (fake samples):")
+        print("\n  Per-head mean scores (fake samples):")
         fake_mask = cfn_labels == 1
         real_mask = cfn_labels == 0
         for name in ['texture', 'frequency', 'artifact', 'vit', 'dino']:
@@ -510,12 +507,12 @@ def main():
         print(f"  F1:        {ens_metrics['f1']:.4f}")
 
         cm = ens_metrics['confusion_matrix']
-        print(f"\n  Confusion Matrix:")
-        print(f"                  Predicted Real  Predicted Fake")
+        print("\n  Confusion Matrix:")
+        print("                  Predicted Real  Predicted Fake")
         print(f"    Actual Real    {cm[0][0]:>10d}    {cm[0][1]:>10d}")
         print(f"    Actual Fake    {cm[1][0]:>10d}    {cm[1][1]:>10d}")
 
-        print(f"\n  Per-model mean scores (fake samples):")
+        print("\n  Per-model mean scores (fake samples):")
         fake_mask = ens_labels == 1
         real_mask = ens_labels == 0
         for name in ens_per_model:
@@ -564,13 +561,13 @@ def main():
 
         # Verdict
         acc_delta = cfn_metrics['accuracy'] - ens_metrics['accuracy']
-        print(f"\n  VERDICT:")
+        print("\n  VERDICT:")
         if acc_delta >= -0.05:
             print(f"    CorefakeNet accuracy is within 5% of ensemble ({acc_delta:+.4f})")
-            print(f"    --> PASS: Ready for integration as Fast Mode")
+            print("    --> PASS: Ready for integration as Fast Mode")
         else:
             print(f"    CorefakeNet accuracy is {abs(acc_delta):.4f} below ensemble")
-            print(f"    --> NEEDS IMPROVEMENT before integration")
+            print("    --> NEEDS IMPROVEMENT before integration")
 
     print(f"\n{'='*70}")
     print("Evaluation complete.")
