@@ -186,15 +186,15 @@ export default function ImageAnalysis() {
                 <div className="flex flex-col items-center">
                   <RiskGauge percentage={results.risk_percent} />
 
-                  <div className="flex gap-4 mt-2">
-                    {results.confidence != null && (
+                  <div className="flex flex-wrap justify-center gap-4 mt-2">
+                    {results.confidence && (
                       <span className="text-xs text-text-2">
-                        Confidence: <strong className="text-text-1">{(results.confidence * 100).toFixed(1)}%</strong>
+                        Confidence: <strong className="text-text-1">{results.confidence}</strong>
                       </span>
                     )}
-                    {results.model_agreement != null && (
+                    {results.model_agreement && (
                       <span className="text-xs text-text-2">
-                        Agreement: <strong className="text-text-1">{(results.model_agreement * 100).toFixed(0)}%</strong>
+                        Agreement: <strong className="text-text-1">{results.model_agreement}</strong>
                       </span>
                     )}
                   </div>
