@@ -12,7 +12,7 @@ import useForensicStore from '../store/useForensicStore';
 
 export default function VideoAnalysis() {
   const [file, setFile] = useState(null);
-  const [fps, setFps] = useState(2);
+  const [fps, setFps] = useState(1);
   const [aggregation, setAggregation] = useState('weighted_avg');
   const [videoUrl, setVideoUrl] = useState(null);
   const [confirmCancel, setConfirmCancel] = useState(false);

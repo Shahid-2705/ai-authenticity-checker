@@ -226,7 +226,7 @@ async def api_analyze_image(
 async def api_analyze_video(
     request: Request,
     file: UploadFile = File(...),
-    fps: float = Query(4.0, ge=0.5, le=30),
+    fps: float = Query(1.0, ge=0.5, le=30),
     aggregation: str = Query("weighted_avg"),
     current_user: Optional[dict] = Depends(get_current_user),
 ):
