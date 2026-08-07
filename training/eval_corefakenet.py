@@ -51,7 +51,7 @@ def load_corefakenet(device):
         return None
 
     model = CorefakeNet()
-    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+    checkpoint = torch.load(model_path, map_location=device, weights_only=True)
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'])
         print(f"CorefakeNet loaded (epoch {checkpoint.get('epoch', '?')}, "
@@ -79,7 +79,7 @@ def load_ensemble(device):
     path = os.path.join(MODELS_DIR, "efficient.pth")
     if os.path.exists(path):
         m = EfficientNetTexture()
-        m.load_state_dict(torch.load(path, map_location=device, weights_only=False))
+        m.load_state_dict(torch.load(path, map_location=device, weights_only=True))
         m.to(device).eval()
         models['texture'] = m
         print("  Loaded: EfficientNet-B4 Texture")
@@ -88,7 +88,7 @@ def load_ensemble(device):
     path = os.path.join(MODELS_DIR, "frequency.pth")
     if os.path.exists(path):
         m = FrequencyCNN()
-        m.load_state_dict(torch.load(path, map_location=device, weights_only=False))
+        m.load_state_dict(torch.load(path, map_location=device, weights_only=True))
         m.to(device).eval()
         models['frequency'] = m
         print("  Loaded: Frequency CNN")
@@ -97,7 +97,7 @@ def load_ensemble(device):
     path = os.path.join(MODELS_DIR, "dinov2_auth_model.pth")
     if os.path.exists(path):
         m = DINOv2AuthModel()
-        m.load_state_dict(torch.load(path, map_location=device, weights_only=False))
+        m.load_state_dict(torch.load(path, map_location=device, weights_only=True))
         m.to(device).eval()
         models['dino'] = m
         print("  Loaded: DINOv2")
@@ -106,7 +106,7 @@ def load_ensemble(device):
     path = os.path.join(MODELS_DIR, "efficientnet_auth_model.pth")
     if os.path.exists(path):
         m = EfficientNetAuthModel()
-        m.load_state_dict(torch.load(path, map_location=device, weights_only=False))
+        m.load_state_dict(torch.load(path, map_location=device, weights_only=True))
         m.to(device).eval()
         models['efficientnet'] = m
         print("  Loaded: EfficientNetV2-S Auth")
@@ -115,7 +115,7 @@ def load_ensemble(device):
     path = os.path.join(MODELS_DIR, "image_face_model.pth")
     if os.path.exists(path):
         m = FaceDeepfakeModel()
-        m.load_state_dict(torch.load(path, map_location=device, weights_only=False))
+        m.load_state_dict(torch.load(path, map_location=device, weights_only=True))
         m.to(device).eval()
         models['face'] = m
         print("  Loaded: Face Deepfake (ResNet50)")
@@ -124,7 +124,7 @@ def load_ensemble(device):
     path = os.path.join(MODELS_DIR, "fusion_mlp.pth")
     if os.path.exists(path):
         m = FusionMLP()
-        m.load_state_dict(torch.load(path, map_location=device, weights_only=False))
+        m.load_state_dict(torch.load(path, map_location=device, weights_only=True))
         m.to(device).eval()
         models['fusion'] = m
         print("  Loaded: Fusion MLP")

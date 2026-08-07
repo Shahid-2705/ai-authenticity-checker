@@ -1,34 +1,27 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { getRiskColorRaw, normalizeScore } from '../utils/risk';
 
 export default function ScoreBar({ name, score }) {
-  // Assume score is between 0 and 1. If it's larger (e.g. 100), handle it.
-  const percentage = score <= 1 ? score * 100 : score;
-  
-  const getRiskColor = (pct) => {
-    if (pct > 70) return '#EC4899'; // High
-    if (pct > 40) return '#F59E0B'; // Medium
-    return '#10B981'; // Low
-  };
+  const percentage = normalizeScore(score);
+  const color = getRiskColorRaw(percentage);
+  const clamped = Math.min(100, Math.max(0, percentage));
 
-  const color = getRiskColor(percentage);
-  
   return (
-    <div className="mb-3">
-      <div className="flex justify-between items-end mb-1.5">
-        <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">{name}</span>
-        <span className="text-xs font-bold" style={{ color }}>{percentage.toFixed(1)}%</span>
+    <div className="mb-2.5">
+      <div className="flex justify-between items-center mb-1.5">
+        <span className="text-xs text-text-2">{name}</span>
+        <span className="text-xs font-mono text-text-1">
+          {percentage.toFixed(1)}%
+        </span>
       </div>
-      <div className="h-2 w-full bg-border-subtle rounded-full overflow-hidden">
+      <div className="h-1.5 w-full rounded-full overflow-hidden bg-white/[0.06]">
         <motion.div
           initial={{ width: 0 }}
-          animate={{ width: `${Math.min(100, Math.max(0, percentage))}%` }}
-          transition={{ duration: 0.8, ease: "easeOut" }}
+          animate={{ width: `${clamped}%` }}
+          transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
           className="h-full rounded-full"
-          style={{ 
-            backgroundColor: color,
-            boxShadow: `0 0 10px ${color}80`
-          }}
+          style={{ background: color }}
         />
       </div>
     </div>

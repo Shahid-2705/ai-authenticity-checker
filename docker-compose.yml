@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: proofyx
+      POSTGRES_USER: proofyx
+      POSTGRES_PASSWORD: proofyx_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proofyx"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  proofyx:
+    build:
+      context: .
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
+    ports:
+      - "7861:7861"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://proofyx:proofyx_dev@postgres:5432/proofyx
+    volumes:
+      - ./models:/app/models:ro
+      - proofyx-data:/app/data
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  proofyx-data:
+  pgdata:

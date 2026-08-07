@@ -1,78 +1,206 @@
-import React from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { ShieldAlert, Image, Film, Mic, Layers } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Image, Film, Mic, Layers, Clock, Shield, Cpu, Upload, FileSearch, ArrowUpRight } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import useForensicStore from '../store/useForensicStore';
+import EmptyDashboard from '../components/EmptyDashboard';
+import { staggerFadeUp } from '../utils/animations';
+import { getRiskColorRaw, getRiskBg, getRiskLevel, normalizeScore } from '../utils/risk';
+import { formatRelativeTime, detectMediaRoute } from '../utils/format';
+
+const MEDIA_ICONS = { image: Image, video: Film, audio: Mic, multimodal: Layers };
+const ANALYSIS_CARDS = [
+  { to: '/image', label: 'Image', desc: 'Synthetic face & pixel manipulation', icon: Image },
+  { to: '/video', label: 'Video', desc: 'Temporal consistency & frame analysis', icon: Film },
+  { to: '/audio', label: 'Audio', desc: 'Voice cloning & spectrogram forensics', icon: Mic },
+  { to: '/multimodal', label: 'Multimodal', desc: 'Cross-modal fusion confidence matrix', icon: Layers },
+];
+const STAT_DEFS = (totals, models, cleared) => [
+  { label: 'Total Scans', value: totals, icon: FileSearch, iconClass: 'text-accent' },
+  { label: 'Avg Risk', value: null, icon: Shield, iconClass: 'text-risk-caution' },
+  { label: 'Models Active', value: models, icon: Cpu, iconClass: 'text-accent' },
+  { label: 'Cleared', value: cleared, icon: Shield, iconClass: 'text-risk-clear' },
+];
 
 export default function Dashboard() {
-  const cards = [
-    {
-      to: "/image",
-      title: "Image Forensics",
-      desc: "Detect manipulated pixels and synthetic faces",
-      icon: <Image size={32} className="text-accent-cyan" />,
-      bg: "from-[rgba(0,240,255,0.05)] to-transparent",
-      border: "hover:border-accent-cyan"
-    },
-    {
-      to: "/video",
-      title: "Video Forensics",
-      desc: "Frame-by-frame temporal consistency alignment",
-      icon: <Film size={32} className="text-accent-violet" />,
-      bg: "from-[rgba(168,85,247,0.05)] to-transparent",
-      border: "hover:border-accent-violet"
-    },
-    {
-      to: "/audio",
-      title: "Audio Forensics",
-      desc: "Spectrogram analysis for synthetic voice cloning",
-      icon: <Mic size={32} className="text-accent-green" />,
-      bg: "from-[rgba(16,185,129,0.05)] to-transparent",
-      border: "hover:border-accent-green"
-    },
-    {
-      to: "/multimodal",
-      title: "Multimodal Fusion",
-      desc: "Compound confidence matrix using all available factors",
-      icon: <Layers size={32} className="text-[#F59E0B]" />,
-      bg: "from-[rgba(245,158,11,0.05)] to-transparent",
-      border: "hover:border-[#F59E0B]"
-    }
-  ];
+  const { history, historyTotal, fetchHistory, systemStatus, fetchStatus, isStatusLoading, setPendingFile } = useForensicStore();
+  const navigate = useNavigate();
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleQuickFile = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPendingFile(file);
+    navigate(detectMediaRoute(file));
+  }, [navigate, setPendingFile]);
+
+  useEffect(() => { fetchHistory(20); fetchStatus(); }, [fetchHistory, fetchStatus]);
+
+  const modelsOnline = systemStatus.loaded_models?.length || 0;
+  const totalModels = modelsOnline + (systemStatus.missing_models?.length || 0);
+  const riskCounts = history.reduce((acc, item) => {
+    const pct = normalizeScore(item.risk_score);
+    if (pct > 70) acc.critical += 1;
+    else if (pct > 40) acc.caution += 1;
+    else acc.clear += 1;
+    return acc;
+  }, { clear: 0, caution: 0, critical: 0 });
+  const avgRisk = historyTotal > 0
+    ? Math.round(history.reduce((s, i) => s + normalizeScore(i.risk_score), 0) / history.length) : 0;
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault(); setDragOver(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    setPendingFile(file);
+    navigate(detectMediaRoute(file));
+  }, [navigate, setPendingFile]);
+
+  /* Empty state */
+  if (historyTotal === 0 && !isStatusLoading) {
+    return (
+      <motion.div initial="hidden" animate="visible" className="space-y-5">
+        <motion.div variants={staggerFadeUp} custom={0}>
+          <h1 className="font-display text-xl font-bold tracking-tight gradient-text">Forensics Command Center</h1>
+          <p className="text-xs mt-0.5 text-text-3">AI-powered deepfake detection & media authentication</p>
+        </motion.div>
+        <EmptyDashboard />
+      </motion.div>
+    );
+  }
+
+  const barTotal = riskCounts.clear + riskCounts.caution + riskCounts.critical || 1;
+  const recentScans = history.slice(0, 5);
+  const stats = STAT_DEFS(historyTotal, `${modelsOnline}/${totalModels}`, riskCounts.clear);
+  stats[1].value = `${avgRisk}%`;
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center min-h-[85vh] text-center space-y-12">
-      <div className="space-y-6">
-        <div className="w-24 h-24 mx-auto rounded-3xl bg-gradient-to-br from-accent-cyan to-accent-violet flex items-center justify-center shadow-[0_0_50px_rgba(0,240,255,0.3)]">
-          <ShieldAlert className="text-white" size={48} />
-        </div>
-        <h2 className="text-5xl font-black tracking-tighter">
-          Intelligence <span className="bg-clip-text text-transparent bg-gradient-to-r from-accent-cyan to-accent-violet">Command Center</span>
-        </h2>
-        <p className="text-text-secondary max-w-xl mx-auto text-lg">
-          Select an analysis vector below to initialize the neural detection pipeline.
-        </p>
-      </div>
+    <motion.div initial="hidden" animate="visible" className="space-y-5"
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)} onDrop={handleDrop}>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full max-w-6xl">
-        {cards.map((card) => (
-          <Link 
-            key={card.to} 
-            to={card.to}
-            className={`group relative glass-card p-6 border-border-subtle overflow-hidden transition-all duration-500 hover:scale-105 hover:-translate-y-2 ${card.border}`}
-          >
-            <div className={`absolute inset-0 bg-gradient-to-b ${card.bg} opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
-            <div className="relative z-10 flex flex-col items-center text-center space-y-4">
-              <div className="p-4 rounded-xl bg-background border border-[rgba(255,255,255,0.05)] group-hover:scale-110 transition-transform duration-500">
-                {card.icon}
-              </div>
-              <div>
-                <h3 className="font-bold text-white mb-2 tracking-wide">{card.title}</h3>
-                <p className="text-xs text-text-muted">{card.desc}</p>
-              </div>
+      {/* Header */}
+      <motion.div variants={staggerFadeUp} custom={0} className="flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="font-display text-xl font-bold tracking-tight gradient-text">Forensics Command Center</h1>
+          <p className="text-xs mt-0.5 text-text-3">AI-powered deepfake detection & media authentication</p>
+        </div>
+        <span className="text-xs font-mono text-text-3">{modelsOnline}/{totalModels} models online</span>
+      </motion.div>
+
+      {/* Stat cards */}
+      <motion.div variants={staggerFadeUp} custom={1} className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {stats.map(({ label, value, icon: Icon, iconClass }) => (
+          <div key={label} className="card">
+            <div className="flex items-center gap-2 mb-2">
+              <Icon size={14} className={iconClass} />
+              <span className="label-tag">{label}</span>
             </div>
-          </Link>
+            <p className="font-display text-lg font-bold text-text-1">{value}</p>
+          </div>
         ))}
-      </div>
+      </motion.div>
+
+      {/* Risk breakdown bar */}
+      {historyTotal > 0 && (
+        <motion.div variants={staggerFadeUp} custom={2} className="card">
+          <span className="label-tag mb-3 block">Risk Distribution</span>
+          <div className="flex gap-1 h-3 rounded-full overflow-hidden">
+            <div className="rounded-l-full bg-risk-clear" style={{ width: `${(riskCounts.clear / barTotal) * 100}%` }} />
+            <div className="bg-risk-caution" style={{ width: `${(riskCounts.caution / barTotal) * 100}%` }} />
+            <div className="rounded-r-full bg-risk-critical" style={{ width: `${(riskCounts.critical / barTotal) * 100}%` }} />
+          </div>
+          <div className="flex gap-6 mt-2">
+            {[{ l: 'cleared', c: riskCounts.clear, cls: 'bg-risk-clear' },
+              { l: 'caution', c: riskCounts.caution, cls: 'bg-risk-caution' },
+              { l: 'critical', c: riskCounts.critical, cls: 'bg-risk-critical' }].map((b) => (
+              <span key={b.l} className="flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${b.cls}`} />
+                <span className="text-xs font-mono text-text-3">{b.c} {b.l}</span>
+              </span>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Quick upload + analysis cards */}
+      <motion.div variants={staggerFadeUp} custom={3} className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div
+          className={`card flex flex-col items-center justify-center text-center cursor-pointer min-h-[160px] border-dashed ${dragOver ? 'border-accent' : ''}`}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,video/*,audio/*"
+            onChange={handleQuickFile}
+            className="hidden"
+            aria-label="Quick analyze file"
+          />
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3 bg-accent-dim">
+            <Upload size={18} className="text-accent" />
+          </div>
+          <p className="text-sm font-semibold text-text-1">Quick Analyze</p>
+          <p className="text-xs mt-1 text-text-3">Drop any file or click to browse</p>
+        </div>
+        <div className="lg:col-span-2 grid grid-cols-2 gap-3">
+          {ANALYSIS_CARDS.map(({ to, label, desc, icon: Icon }) => (
+            <Link key={to} to={to} className="group card card-hover flex flex-col no-underline">
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent-dim">
+                  <Icon size={15} className="text-accent" />
+                </div>
+                <ArrowUpRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity text-accent" />
+              </div>
+              <span className="text-sm font-semibold text-text-1">{label}</span>
+              <span className="text-xs mt-0.5 text-text-3">{desc}</span>
+            </Link>
+          ))}
+        </div>
+      </motion.div>
+
+      {/* Recent scans table */}
+      {recentScans.length > 0 && (
+        <motion.div variants={staggerFadeUp} custom={4} className="card overflow-hidden !p-0">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border-dim">
+            <div className="flex items-center gap-2">
+              <Clock size={13} className="text-accent" />
+              <span className="label-tag">Recent Activity</span>
+            </div>
+            <Link to="/history" className="text-xs font-medium text-accent no-underline">View all</Link>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-text-3 text-xs">
+                <th className="px-4 py-2 font-medium">Time</th>
+                <th className="px-4 py-2 font-medium">Type</th>
+                <th className="px-4 py-2 font-medium">File</th>
+                <th className="px-4 py-2 font-medium text-right">Risk</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentScans.map((item) => {
+                const pct = normalizeScore(item.risk_score);
+                const Icon = MEDIA_ICONS[item.media_type] || FileSearch;
+                return (
+                  <tr key={item.id} className="border-t border-border-dim cursor-pointer table-row-hover"
+                    onClick={() => navigate('/history')}>
+                    <td className="px-4 py-2 text-xs font-mono text-text-3">{formatRelativeTime(item.created_at || item.timestamp)}</td>
+                    <td className="px-4 py-2"><Icon size={14} className="text-text-2" /></td>
+                    <td className="px-4 py-2 truncate max-w-[200px] text-text-1">{item.file_name || `${item.media_type} analysis`}</td>
+                    <td className="px-4 py-2 text-right">
+                      <span className="text-xs font-bold font-mono px-2 py-0.5 rounded" style={{ color: getRiskColorRaw(pct), background: getRiskBg(pct) }}>
+                        {pct.toFixed(0)}%
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </motion.div>
+      )}
     </motion.div>
   );
 }

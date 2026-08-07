@@ -10,6 +10,9 @@ models/_backup_*/
 # HuggingFace cache
 .hf_cache/
 
+# Downloaded dataset samples
+data/samples/
+
 # Python
 __pycache__/
 *.pyc
@@ -36,6 +39,9 @@ env/
 Thumbs.db
 
 
+# Database
+proofyx_history.db
+
 # Temp files
 *.tmp
 *.log
@@ -46,11 +52,9 @@ Thumbs.db
 # Windows artifact
 nul
 
-# Test images
+# Test fixtures in root
 test_image.jpg
-
-# Local scan history (churns constantly, not meant to be shared)
-proofyx_history.db
+dummy.mp4
 
 # Manual test examples (may include personal photos, kept local only)
 test_examples/

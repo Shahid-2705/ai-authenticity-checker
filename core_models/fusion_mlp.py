@@ -21,7 +21,7 @@ class ModelCalibrator(nn.Module):
     Each model gets its own temperature parameter.
     """
 
-    def __init__(self, n_models=4):
+    def __init__(self, n_models=7):
         super().__init__()
         # Initialize temperatures to 1.0 (no scaling)
         self.temperatures = nn.Parameter(torch.ones(n_models))
@@ -50,7 +50,17 @@ class FusionMLP(nn.Module):
     Architecture:
         calibrate -> Linear(n_inputs, 8) -> ReLU -> Linear(8, 1) -> Sigmoid
 
-    Input order: MODEL_NAMES (see below)
+    Input order: MODEL_NAMES (see below).
+
+    NOTE: upstream/main independently redesigned this as a deeper 3-layer
+    network (Linear(7,16)->Linear(16,8)->Linear(8,1)) with a different
+    input order/naming (efficientnet vs efficientnet_auth). Kept the
+    smaller architecture here deliberately: the currently-deployed
+    models/fusion_mlp.pth was trained against this exact shape and input
+    order today (see training/train_fusion.py history) - swapping
+    architectures would silently invalidate it, not just require a reload.
+    The deeper design may be worth adopting later, but that requires a
+    full fusion retrain first, not a merge-time swap.
     """
 
     MODEL_NAMES = [

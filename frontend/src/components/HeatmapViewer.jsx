@@ -1,44 +1,67 @@
-import React, { useState } from 'react';
-import { Layers } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 
 export default function HeatmapViewer({ originalFile, gradcamBase64 }) {
   const [showHeatmap, setShowHeatmap] = useState(true);
+  const blobUrlRef = useRef(null);
+
+  // Create and clean up blob URL for the original file
+  useEffect(() => {
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+    if (originalFile) {
+      blobUrlRef.current = URL.createObjectURL(originalFile);
+    }
+    return () => {
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
+    };
+  }, [originalFile]);
+
+  const originalUrl = blobUrlRef.current;
+  const heatmapUrl = gradcamBase64 ? `data:image/png;base64,${gradcamBase64}` : null;
 
   if (!originalFile && !gradcamBase64) {
     return (
-      <div className="w-full h-full min-h-[300px] flex items-center justify-center bg-[rgba(255,255,255,0.02)] rounded-xl border border-border-subtle">
-        <p className="text-text-muted">Awaiting visual results</p>
+      <div className="w-full flex flex-col items-center justify-center rounded-xl min-h-[360px] bg-bg-inset border border-border-dim">
+        <Eye size={22} className="mb-2 text-text-3" />
+        <p className="text-sm text-text-3">
+          Heatmap will appear here after analysis
+        </p>
       </div>
     );
   }
 
-  const originalUrl = originalFile ? URL.createObjectURL(originalFile) : null;
-  const heatmapUrl = gradcamBase64 ? `data:image/png;base64,${gradcamBase64}` : null;
-
   return (
-    <div className="relative w-full h-full rounded-xl overflow-hidden glass-card">
-      {/* Tool bar */}
-      <div className="absolute top-4 right-4 z-10 flex gap-2">
-        {heatmapUrl && (
-          <button 
-            onClick={() => setShowHeatmap(!showHeatmap)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold tracking-wide backdrop-blur-md transition-all border
-              ${showHeatmap 
-                ? 'bg-[rgba(236,72,153,0.2)] text-accent-pink border-[rgba(236,72,153,0.4)] shadow-[0_0_10px_rgba(236,72,153,0.2)]' 
-                : 'bg-background-card text-text-primary border-border-subtle'
-              }`}
+    <div className="relative w-full rounded-xl overflow-hidden bg-bg-inset border border-border-dim">
+      {/* Toggle button */}
+      {heatmapUrl && (
+        <div className="absolute top-3 right-3 z-10">
+          <button
+            onClick={() => setShowHeatmap((prev) => !prev)}
+            aria-label={showHeatmap ? 'Show original image' : 'Show GradCAM heatmap'}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium tracking-wide transition-all border ${
+              showHeatmap
+                ? 'bg-[rgba(6,182,212,0.10)] border-[rgba(6,182,212,0.25)] text-accent-2'
+                : 'bg-bg-elevated border-border-dim text-text-2'
+            }`}
           >
-            <Layers size={14} />
-            {showHeatmap ? 'HEATMAP ON' : 'HEATMAP OFF'}
+            {showHeatmap ? <EyeOff size={12} /> : <Eye size={12} />}
+            {showHeatmap ? 'GradCAM' : 'Original'}
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className="w-full h-full min-h-[400px] max-h-[600px] flex items-center justify-center p-2">
-        <img 
-          src={(showHeatmap && heatmapUrl) ? heatmapUrl : originalUrl} 
-          alt="Analysis Output" 
-          className="max-w-full max-h-full object-contain rounded-lg"
+      {/* Image */}
+      <div className="w-full flex items-center justify-center p-4 min-h-[360px] max-h-[560px]">
+        <img
+          src={showHeatmap && heatmapUrl ? heatmapUrl : originalUrl}
+          alt={showHeatmap && heatmapUrl ? 'GradCAM heatmap overlay' : 'Uploaded image'}
+          className="max-w-full max-h-[540px] object-contain rounded-lg transition-opacity duration-300"
         />
       </div>
     </div>

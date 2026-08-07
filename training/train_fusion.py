@@ -73,7 +73,7 @@ def _load_vit(device):
         processor = ViTImageProcessor.from_pretrained(model_id)
         model.eval()
         return model, processor
-    except Exception as e:
+    except Exception as e:  # Broad catch: HF model loading can fail in many ways
         print(f"WARNING: Could not load ViT: {e}")
         return None, None
 
@@ -114,13 +114,13 @@ def collect_predictions(device):
     face_model = _load_component(device, FaceDeepfakeModel, "image_face_model.pth", "face")
 
     # Load dataset — skip samples used by component models to avoid data leakage.
-    # dataset_portraits.py now has 2 sources (JamieWithofs was dropped for
+    # dataset_portraits.py now has many sources (JamieWithofs was dropped for
     # being unreliable). Component model consumption per class per source:
     #   EfficientNet texture: MAX_SAMPLES=3000 -> 750/class/source
-    #   Frequency CNN:        MAX_SAMPLES=16000 -> 4000/class/source
-    # Skip past the larger of the two (4000) so neither model's training
-    # data leaks into fusion's "held-out" set. DINOv2/EfficientNet Auth/Face
-    # were trained on entirely separate HF streams (not dataset_portraits.py),
+    #   Frequency CNN:        MAX_SAMPLES=20000 -> 5000/class/source
+    # Skip past the larger of the two so neither model's training data leaks
+    # into fusion's "held-out" set. DINOv2/EfficientNet Auth/Face were
+    # trained on entirely separate HF streams (not dataset_portraits.py),
     # so no additional skip is needed for them.
     val_data, _ = load_portrait_dataset(
         max_samples=MAX_SAMPLES,
@@ -173,7 +173,7 @@ def collect_predictions(device):
                         probs[0][fake_idx[0]].item()
                         if fake_idx else probs[0][1].item()
                     )
-            except Exception:
+            except Exception:  # Broad catch: ViT inference varies across image inputs
                 pass
 
         # Shared 224x224 tensor for texture/dino/efficientnet_auth/face
@@ -187,14 +187,14 @@ def collect_predictions(device):
             try:
                 with torch.no_grad():
                     scores[1] = texture_model(tensor).item()
-            except Exception:
+            except Exception:  # Broad catch: model can fail on edge-case images
                 pass
 
         # Forensic score (heuristic — kept as input feature)
         try:
-            from app import forensic_score
+            from core.pipeline import forensic_score
             scores[2] = forensic_score(img)
-        except Exception:
+        except Exception:  # Broad catch: forensic heuristic may fail on unusual images
             scores[2] = 0.0
 
         # Frequency CNN score
@@ -203,7 +203,7 @@ def collect_predictions(device):
                 fft_tensor = fft_to_tensor(img).unsqueeze(0).to(device)
                 with torch.no_grad():
                     scores[3] = freq_model(fft_tensor).item()
-            except Exception:
+            except Exception:  # Broad catch: FFT can fail on edge-case images
                 pass
 
         # DINOv2 score
@@ -211,7 +211,7 @@ def collect_predictions(device):
             try:
                 with torch.no_grad():
                     scores[4] = dino_model(tensor).item()
-            except Exception:
+            except Exception:  # Broad catch: DINO can fail on edge-case images
                 pass
 
         # EfficientNet Auth score
@@ -219,7 +219,7 @@ def collect_predictions(device):
             try:
                 with torch.no_grad():
                     scores[5] = eff_auth_model(tensor).item()
-            except Exception:
+            except Exception:  # Broad catch: model can fail on edge-case images
                 pass
 
         # Face Deepfake score (model outputs P(real); fusion wants P(fake))
@@ -228,7 +228,7 @@ def collect_predictions(device):
                 with torch.no_grad():
                     real_prob = face_model(tensor).item()
                     scores[6] = 1.0 - real_prob
-            except Exception:
+            except Exception:  # Broad catch: face model can fail on non-face images
                 pass
 
         all_scores.append(scores)

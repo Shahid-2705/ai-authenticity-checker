@@ -1,27 +1,99 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import React, { Suspense, useEffect, lazy } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
-import Dashboard from './pages/Dashboard';
-import ImageAnalysis from './pages/ImageAnalysis';
-import VideoAnalysis from './pages/VideoAnalysis';
-import AudioAnalysis from './pages/AudioAnalysis';
-import Multimodal from './pages/Multimodal';
-import StatusPage from './pages/StatusPage';
+import ErrorBoundary from './components/ErrorBoundary';
+import useAuthStore from './store/useAuthStore';
+import { isAuthEnabled } from './services/supabase';
+
+// Auth pages — small, keep eager for instant paint
+import Login from './pages/Login';
+import Signup from './pages/Signup';
+import ForgotPassword from './pages/ForgotPassword';
+
+// App pages — lazy-loaded to reduce initial bundle
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const ImageAnalysis = lazy(() => import('./pages/ImageAnalysis'));
+const VideoAnalysis = lazy(() => import('./pages/VideoAnalysis'));
+const AudioAnalysis = lazy(() => import('./pages/AudioAnalysis'));
+const Multimodal = lazy(() => import('./pages/Multimodal'));
+const History = lazy(() => import('./pages/History'));
+const SystemStatus = lazy(() => import('./pages/SystemStatus'));
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center py-24">
+      <div className="w-5 h-5 border-2 rounded-full animate-spin border-accent border-t-transparent" />
+    </div>
+  );
+}
+
+function ProtectedRoute({ children }) {
+  const { user, isLoading } = useAuthStore();
+
+  if (!isAuthEnabled()) return children;
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-bg-void">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-6 h-6 border-2 rounded-full animate-spin border-accent border-t-transparent" />
+          <span className="text-sm text-text-2">Loading...</span>
+        </div>
+      </div>
+    );
+  }
+  if (!user) return <Navigate to="/login" replace />;
+  return children;
+}
+
+/** Redirect authenticated users away from login/signup/forgot pages. */
+function GuestRoute({ children }) {
+  const { user, isLoading } = useAuthStore();
+
+  if (!isAuthEnabled()) return children;
+  if (isLoading) return null;
+  if (user) return <Navigate to="/" replace />;
+  return children;
+}
 
 function App() {
+  const { initialize } = useAuthStore();
+
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
+
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="image" element={<ImageAnalysis />} />
-          <Route path="video" element={<VideoAnalysis />} />
-          <Route path="audio" element={<AudioAnalysis />} />
-          <Route path="multimodal" element={<Multimodal />} />
-          <Route path="status" element={<StatusPage />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <Routes>
+          {/* Guest-only auth routes — redirect to / if already logged in */}
+          <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
+          <Route path="/signup" element={<GuestRoute><Signup /></GuestRoute>} />
+          <Route path="/forgot-password" element={<GuestRoute><ForgotPassword /></GuestRoute>} />
+
+          {/* Protected app routes */}
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Suspense fallback={<PageLoader />}><Dashboard /></Suspense>} />
+            <Route path="image" element={<Suspense fallback={<PageLoader />}><ImageAnalysis /></Suspense>} />
+            <Route path="video" element={<Suspense fallback={<PageLoader />}><VideoAnalysis /></Suspense>} />
+            <Route path="audio" element={<Suspense fallback={<PageLoader />}><AudioAnalysis /></Suspense>} />
+            <Route path="multimodal" element={<Suspense fallback={<PageLoader />}><Multimodal /></Suspense>} />
+            <Route path="history" element={<Suspense fallback={<PageLoader />}><History /></Suspense>} />
+            <Route path="system" element={<Suspense fallback={<PageLoader />}><SystemStatus /></Suspense>} />
+          </Route>
+
+          {/* Catch-all: redirect unknown paths to dashboard */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }
 

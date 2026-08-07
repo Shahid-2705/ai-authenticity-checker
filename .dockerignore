@@ -1,0 +1,67 @@
+# Version control
+.git/
+.github/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Node modules (host-level — frontend build uses its own npm ci)
+frontend/node_modules/
+node_modules/
+
+# HuggingFace cache (downloaded at runtime)
+.hf_cache/
+
+# Data and databases
+data/
+proofyx_history.db
+*.db
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files (secrets)
+.env
+
+# Claude Code
+.claude/
+
+# Test fixtures
+test_image.jpg
+dummy.mp4
+*.tmp
+*.log
+
+# Docs and non-runtime files
+docs/
+evaluation/
+general_ai/
+inference/
+training/
+DEPLOYMENT.md
+UPGRADE_PLAN.md
+*.md
+!README.md
+
+# Dev tooling
+.pytest_cache/
+.ruff_cache/
+requirements-dev.txt
+
+# Windows artifact
+nul

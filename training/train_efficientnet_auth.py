@@ -16,7 +16,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torchvision import transforms
 
 from core_models.efficientnet_auth_model import EfficientNetAuthModel
-from training.dataset_portraits import load_portrait_dataset
+from training.dataset_portraits import load_portrait_dataset, PortraitDataset
 
 # ---------------- CONFIG ----------------
 BATCH_SIZE = 32
@@ -24,7 +24,7 @@ EPOCHS = 15
 BACKBONE_LR = 1e-5
 HEAD_LR = 1e-3
 TRAIN_SPLIT = 0.85
-MAX_SAMPLES = 2000           # CPU-practical training
+MAX_SAMPLES = 20000          # 10x increase for meaningful training
 MODEL_PATH = "models/efficientnet_auth_model.pth"
 EARLY_STOPPING_PATIENCE = 5
 LABEL_SMOOTHING = 0.05
@@ -62,9 +62,9 @@ def main():
     ])
 
     # -------- Load dataset via the shared multi-source loader --------
-    # Now pulls from PORTRAIT_SOURCES (2 GAN-style HF-streaming sources,
-    # reservoir-sampled) PLUS OpenRL/DeepFakeFace (diffusion-generated:
-    # SD Inpainting/text2img, InsightFace) instead of the single
+    # Now pulls from PORTRAIT_SOURCES (many GAN/diffusion HF-streaming
+    # sources, reservoir-sampled) PLUS OpenRL/DeepFakeFace (diffusion-
+    # generated: SD Inpainting/text2img, InsightFace) instead of the single
     # Hemg/AI-Generated-vs-Real-Images-Datasets source used before - that
     # source alone taught this model nothing about diffusion output.
     # training/eval_image_benchmark.py found the whole ensemble at 30.8%
@@ -81,7 +81,7 @@ def main():
     # the hairline/jaw/neck edge just outside it, and losing the
     # complementary whole-image signal across 3 of 7 fusion inputs hurt
     # more than the crop helped. Reverted.
-    print("Loading portrait dataset (GAN sources + diffusion source)...")
+    print(f"Loading multi-source portrait dataset ({MAX_SAMPLES} samples)...")
     train_data, val_data = load_portrait_dataset(
         max_samples=MAX_SAMPLES, train_split=TRAIN_SPLIT, face_align=False,
     )
@@ -89,34 +89,13 @@ def main():
     print(f"Train samples: {len(train_data)}")
     print(f"Val samples  : {len(val_data)}")
 
-    # -------- Dataset Wrapper --------
-    class ImageDataset(torch.utils.data.Dataset):
-        def __init__(self, data, tfm):
-            self.data = data
-            self.tfm = tfm
-
-        def __len__(self):
-            return len(self.data)
-
-        def __getitem__(self, idx):
-            img, label = self.data[idx]
-            img = self.tfm(img)
-            return img, torch.tensor(label, dtype=torch.float32)
-
     train_loader = DataLoader(
-        ImageDataset(train_data, train_transform),
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=0,
-        pin_memory=True
+        PortraitDataset(train_data, train_transform),
+        batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=True,
     )
-
     val_loader = DataLoader(
-        ImageDataset(val_data, val_transform),
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        num_workers=0,
-        pin_memory=True
+        PortraitDataset(val_data, val_transform),
+        batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True,
     )
 
     # -------- Model --------

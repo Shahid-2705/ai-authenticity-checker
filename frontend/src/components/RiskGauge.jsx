@@ -1,61 +1,62 @@
 import React, { useEffect, useState } from 'react';
+import { getRiskColorRaw, getRiskGlow, getRiskLevel } from '../utils/risk';
 
-export default function RiskGauge({ percentage, label = "AI Risk", size = 200 }) {
-  const [offset, setOffset] = useState(0);
-  
-  const radius = size * 0.4;
+export default function RiskGauge({ percentage, label = 'AI Risk Score', size = 160 }) {
+  const [animated, setAnimated] = useState(false);
+
+  const radius = size * 0.38;
   const circumference = 2 * Math.PI * radius;
-  
-  // Calculate risk level color
-  const getRiskColor = (pct) => {
-    if (pct > 70) return '#EC4899'; // High - Pink
-    if (pct > 40) return '#F59E0B'; // Medium - Amber
-    return '#10B981'; // Low - Green
-  };
+  const strokeWidth = 6;
+  const color = getRiskColorRaw(percentage);
+  const offset = animated ? ((100 - percentage) / 100) * circumference : circumference;
 
-  const color = getRiskColor(percentage);
-  
   useEffect(() => {
-    const progressOffset = ((100 - percentage) / 100) * circumference;
-    // Small timeout to trigger animation on mount
-    const timer = setTimeout(() => setOffset(progressOffset), 100);
-    return () => clearTimeout(timer);
-  }, [percentage, circumference]);
+    const t = setTimeout(() => setAnimated(true), 120);
+    return () => clearTimeout(t);
+  }, [percentage]);
 
   return (
-    <div className="flex flex-col items-center justify-center relative p-6">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {/* Background Circle */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="rgba(255,255,255,0.06)"
-          strokeWidth="12"
-        />
-        {/* Progress Circle */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={color}
-          strokeWidth="12"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset === 0 ? circumference : offset}
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-          style={{ transition: 'stroke-dashoffset 1s ease-out', filter: `drop-shadow(0 0 8px ${color}66)` }}
-        />
-      </svg>
-      <div className="absolute flex flex-col items-center justify-center inset-0 pointer-events-none">
-        <span className="text-4xl font-black font-sans tracking-tighter" style={{ color }}>
-          {percentage.toFixed(1)}%
-        </span>
-        <span className="text-xs font-semibold text-text-secondary mt-1 uppercase tracking-wider">
-          {label}
-        </span>
+    <div className="flex flex-col items-center justify-center py-3">
+      <div
+        className="relative"
+        style={{
+          width: size,
+          height: size,
+          transform: animated ? 'scale(1)' : 'scale(0.95)',
+          opacity: animated ? 1 : 0,
+          transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease',
+        }}
+      >
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-90deg)' }}>
+          <circle
+            cx={size / 2} cy={size / 2} r={radius}
+            fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth={strokeWidth}
+          />
+          <circle
+            cx={size / 2} cy={size / 2} r={radius}
+            fill="none" stroke={color} strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.22, 1, 0.36, 1)' }}
+          />
+        </svg>
+
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="font-display font-bold tracking-tight text-2xl leading-none text-text-1">
+            {percentage.toFixed(1)}<span className="text-xs">%</span>
+          </span>
+          <span className="text-xs mt-1 text-text-3">
+            {label}
+          </span>
+        </div>
+      </div>
+
+      <div
+        className="mt-2 px-3 py-1 rounded-full text-xs font-medium"
+        style={{ background: `${color}10`, color, border: `1px solid ${color}26` }}
+      >
+        {getRiskLevel(percentage)}
       </div>
     </div>
   );

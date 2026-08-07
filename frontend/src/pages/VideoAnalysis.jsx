@@ -1,159 +1,227 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Film, Activity, Settings2, Play } from 'lucide-react';
+import { Film, Play, Settings2, ShieldCheck, X } from 'lucide-react';
+import { fadeUp, fadeIn } from '../utils/animations';
+import PageHeader from '../components/PageHeader';
+import ConfirmDialog from '../components/ConfirmDialog';
 import UploadZone from '../components/UploadZone';
 import RiskGauge from '../components/RiskGauge';
 import VerdictCard from '../components/VerdictCard';
 import FrameTable from '../components/FrameTable';
-import { forensicApi } from '../services/api';
+import useForensicStore from '../store/useForensicStore';
 
 export default function VideoAnalysis() {
   const [file, setFile] = useState(null);
-  const [fps, setFps] = useState(6);
+  const [fps, setFps] = useState(2);
   const [aggregation, setAggregation] = useState('weighted_avg');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [results, setResults] = useState(null);
-  const [error, setError] = useState(null);
-  
-  const handleAnalyze = async () => {
-    if (!file) return;
-    setIsAnalyzing(true);
-    setError(null);
-    try {
-      const data = await forensicApi.analyzeVideo(file, fps, aggregation);
-      if (data.success) {
-        setResults(data);
-      } else {
-        setError(data.error || "Analysis failed");
-      }
-    } catch (err) {
-      setError(err.response?.data?.error || err.message || "An error occurred");
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
+  const [videoUrl, setVideoUrl] = useState(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const blobUrlRef = useRef(null);
+  const { videoAnalysis, runVideoAnalysis, clearAnalysis, pendingFile, clearPendingFile } = useForensicStore();
+  const { isAnalyzing, results, error } = videoAnalysis;
 
-  const videoBase64 = results?.gradcam_video;
-  const videoUrl = videoBase64 ? `data:video/mp4;base64,${videoBase64}` : null;
+  useEffect(() => {
+    if (pendingFile) {
+      setFile(pendingFile);
+      clearPendingFile();
+    }
+  }, [pendingFile, clearPendingFile]);
+
+  useEffect(() => {
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+    if (file) {
+      const url = URL.createObjectURL(file);
+      blobUrlRef.current = url;
+      setVideoUrl(url);
+    } else {
+      setVideoUrl(null);
+    }
+    return () => {
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
+    };
+  }, [file]);
+
+  const handleFileSelect = useCallback((f) => setFile(f), []);
+  const handleAnalyze = () => { if (file) runVideoAnalysis(file, fps, aggregation); };
+  const handleCancelConfirm = useCallback(() => {
+    const { cancelAnalysis } = useForensicStore.getState();
+    cancelAnalysis('video');
+    clearAnalysis('video');
+    setConfirmCancel(false);
+  }, [clearAnalysis]);
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-      <header className="mb-8">
-        <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-text-secondary">
-          Video Forensics
-        </h2>
-        <p className="text-text-muted mt-2">Frame-by-frame deepfake analysis with temporal consistency checking.</p>
-      </header>
+    <motion.div initial="hidden" animate="visible" variants={fadeUp} className="space-y-5">
+      <PageHeader
+        icon={Film}
+        title="Video Forensics"
+        subtitle="Frame-by-frame deepfake analysis with temporal consistency checking."
+      />
 
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-        {/* Left Column: Controls */}
-        <div className="xl:col-span-1 space-y-6">
-          <UploadZone onFileSelect={setFile} accept="video/*" label="Upload Video (MP4/AVI)" />
-          
-          <div className="glass-card p-4 space-y-5">
-            <h3 className="text-sm font-bold text-text-secondary uppercase tracking-wider flex items-center gap-2">
-              <Settings2 size={16} /> Parameters
-            </h3>
-            
-            <div>
-              <div className="flex justify-between text-xs text-text-primary mb-2">
-                <span>Sampling FPS</span>
-                <span className="font-mono text-accent-cyan">{fps} fps</span>
-              </div>
-              <input 
-                type="range" min="1" max="15" step="0.5" 
-                value={fps} onChange={(e) => setFps(Number(e.target.value))}
-                className="w-full h-1 bg-[rgba(255,255,255,0.1)] rounded-lg appearance-none cursor-pointer accent-accent-cyan"
-              />
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
+        {/* Left panel */}
+        <div className="lg:col-span-1 space-y-4">
+          <UploadZone onFileSelect={handleFileSelect} accept="video/*" label="Drop video or click to browse" />
+
+          {/* Parameters */}
+          <div className="card">
+            <div className="flex items-center gap-2 mb-3">
+              <Settings2 size={14} className="text-text-3" />
+              <span className="label-tag">Parameters</span>
             </div>
-            
-            <div>
-              <label className="text-xs text-text-primary mb-2 block">Temporal Aggregation</label>
-              <select 
-                value={aggregation} onChange={(e) => setAggregation(e.target.value)}
-                className="w-full bg-[rgba(0,0,0,0.3)] border border-border-subtle rounded-lg p-2 text-sm text-text-primary focus:outline-none focus:border-accent-cyan"
-              >
-                <option value="weighted_avg">Attention Weighted Avg</option>
-                <option value="max">Max Peak Risk</option>
-                <option value="average">Simple Average</option>
-                <option value="majority">Majority Vote</option>
-              </select>
+
+            <div className="space-y-4">
+              <div>
+                <div className="flex justify-between mb-2">
+                  <span className="text-xs text-text-2">Sampling FPS</span>
+                  <span className="text-xs font-bold font-mono text-accent">{fps} fps</span>
+                </div>
+                <input
+                  type="range" min="1" max="15" step="0.5"
+                  value={fps}
+                  onChange={(e) => setFps(Number(e.target.value))}
+                  className="w-full h-1 rounded-full cursor-pointer appearance-none bg-border-mid [accent-color:var(--accent)]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs mb-1.5 block text-text-2">
+                  Temporal Aggregation
+                </label>
+                <select
+                  value={aggregation}
+                  onChange={(e) => setAggregation(e.target.value)}
+                  className="field-input text-sm"
+                >
+                  <option value="weighted_avg">Attention Weighted Avg</option>
+                  <option value="max">Max Peak Risk</option>
+                  <option value="average">Simple Average</option>
+                  <option value="majority">Majority Vote</option>
+                </select>
+              </div>
             </div>
           </div>
-          
-          <button 
-            onClick={handleAnalyze} 
-            disabled={!file || isAnalyzing}
-            className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all duration-300
-              ${(!file || isAnalyzing) 
-                ? 'bg-[rgba(255,255,255,0.05)] text-text-muted cursor-not-allowed' 
-                : 'btn-primary shadow-glow-violet'}`}
-          >
-            {isAnalyzing ? (
-              <><Activity className="animate-spin" size={20} /> <span className="animate-pulse">Processing Frames...</span></>
-            ) : (
-              <><Play size={20} /> RUN ANALYSIS</>
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleAnalyze}
+              disabled={!file || isAnalyzing}
+              className="btn-primary flex-1 py-3"
+            >
+              {isAnalyzing ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <><Play size={15} /> Analyze</>
+              )}
+            </button>
+            {isAnalyzing && (
+              <button onClick={() => setConfirmCancel(true)} className="btn-danger px-3" title="Cancel">
+                <X size={15} />
+              </button>
             )}
-          </button>
+          </div>
         </div>
 
-        {/* Center/Right Column: Results & Playback */}
-        <div className="xl:col-span-3 space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 glass-card flex items-center justify-center min-h-[300px] overflow-hidden p-2">
+        {/* Right panel */}
+        <div className="lg:col-span-3 space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Video preview */}
+            <div className="card lg:col-span-2 flex items-center justify-center min-h-[300px] overflow-hidden">
               {videoUrl ? (
-                <video src={videoUrl} controls autoPlay loop className="max-w-full max-h-full rounded-lg" />
+                <video
+                  src={videoUrl}
+                  controls
+                  className="w-full max-h-[400px] rounded-lg object-contain bg-bg-inset"
+                >
+                  Your browser does not support the video tag.
+                </video>
               ) : (
-                <div className="text-center text-text-muted">
-                  <Film size={48} className="mx-auto mb-3 opacity-20" />
-                  <p>GradCAM Heatmap Video</p>
+                <div className="flex flex-col items-center space-y-2 text-text-3">
+                  <Film size={22} className="opacity-30" />
+                  <p className="text-sm">Upload a video to preview</p>
                 </div>
               )}
             </div>
-            <div className="lg:col-span-1 glass-card p-4 flex flex-col justify-center">
+
+            {/* Results */}
+            <div className="card lg:col-span-1 flex flex-col justify-center">
               {error ? (
-                <div className="p-4 bg-[rgba(236,72,153,0.1)] border border-accent-pink rounded-lg text-accent-pink text-sm">
+                <div
+                  role="alert"
+                  className="p-3 rounded-lg text-sm bg-risk-criticalDim text-risk-critical border border-[rgba(251,113,133,0.20)]"
+                >
                   {error}
                 </div>
               ) : results ? (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center">
-                  <RiskGauge percentage={results.risk_percentage || results.data?.risk_percent || 0} label="Video Avg Risk" size={180} />
-                  
-                  {results.risk_label && (
-                    <div className="w-full text-center py-2 mt-2 bg-[rgba(255,255,255,0.03)] rounded-lg text-[11px] font-semibold tracking-wide border border-border-subtle shadow-inner px-2">
-                       {results.risk_label}
+                <motion.div variants={fadeIn} initial="hidden" animate="visible" className="flex flex-col items-center">
+                  <RiskGauge
+                    percentage={results.risk_percent || 0}
+                    label="Video Avg Risk"
+                    size={170}
+                  />
+                  <div className="w-full mt-1">
+                    <VerdictCard verdict={results.verdict} riskScore={results.risk_percent} />
+                  </div>
+
+                  {results.total_frames_analyzed > 0 && (
+                    <div className="w-full mt-3 grid grid-cols-3 gap-2 text-center">
+                      {[
+                        { label: 'Frames', value: results.total_frames_analyzed },
+                        { label: 'Fake', value: results.fake_frames || 0 },
+                        { label: 'Real', value: results.real_frames || 0 },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="inset-panel py-2">
+                          <p className="text-base font-bold font-mono text-text-1">{value}</p>
+                          <p className="text-xs text-text-3">{label}</p>
+                        </div>
+                      ))}
                     </div>
                   )}
-
-                  <div className="w-full mt-2">
-                    <VerdictCard verdict={results.verdict || results.data?.verdict} />
-                  </div>
                 </motion.div>
               ) : (
-                <div className="text-center text-text-muted">
-                  <p>Awaiting Results</p>
+                <div className="flex flex-col items-center justify-center space-y-2 py-8 text-text-3">
+                  <ShieldCheck size={22} className="opacity-30" />
+                  <p className="text-sm">Awaiting results</p>
                 </div>
               )}
             </div>
           </div>
 
-          {(results?.frame_details) && (
-            <div className="glass-card p-4">
-               <h3 className="text-sm font-bold text-text-secondary uppercase tracking-wider mb-4">Frame Timeline Analysis</h3>
-               <FrameTable framesRawStr={results.frame_details} />
+          {results?.frame_details && (
+            <div className="card">
+              <p className="label-tag mb-3">Frame Timeline</p>
+              <FrameTable framesRawStr={results.frame_details} />
             </div>
           )}
-          
-          {(results?.details || results?.data?.explanation) && (
-            <div className="glass-card p-4">
-              <h3 className="text-sm font-bold text-text-secondary uppercase tracking-wider mb-4">Intelligence Details</h3>
-              <pre className="text-xs text-text-muted font-mono whitespace-pre-wrap leading-relaxed bg-[#0A0E1A] p-4 rounded-lg border border-border-subtle">
-                {results.details || JSON.stringify(results.data?.temporal_analysis, null, 2) || results.data?.explanation}
-              </pre>
+
+          {results?.explanation && (
+            <div className="card">
+              <p className="label-tag mb-2">Analysis Details</p>
+              <p className="text-sm leading-relaxed text-text-2">
+                {results.explanation}
+              </p>
             </div>
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmCancel}
+        title="Cancel Analysis"
+        message="The video analysis is still processing frames. Are you sure you want to cancel?"
+        confirmLabel="Cancel Analysis"
+        onConfirm={handleCancelConfirm}
+        onCancel={() => setConfirmCancel(false)}
+      />
     </motion.div>
   );
 }

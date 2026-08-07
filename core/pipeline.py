@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import math
 import os
+import sys
+import tempfile
+import threading
 import time
 import logging
 from typing import Any, Callable, Optional
@@ -61,6 +64,10 @@ class ModelRegistry:
         # Classical ML tie-breaker (RandomForest on hand-crafted features)
         self.forensic_ml = None
 
+        # HuggingFace models (new)
+        self.wav2vec2_audio = None
+        self.clip_deepfake = None
+
         # Analyzers
         self.video_analyzer = None
         self.audio_analyzer = None
@@ -95,6 +102,12 @@ class ModelRegistry:
         # Classical ML tie-breaker
         self._try_load_forensic_ml()
 
+        # Wav2Vec2 audio deepfake detector
+        self._try_load_wav2vec2_audio()
+
+        # CLIP ViT-L/14 deepfake detector
+        self._try_load_clip_deepfake()
+
         # Frequency analyzer (heuristic fallback)
         try:
             from pipeline.video_analyzer import FrequencyAnalyzer
@@ -123,12 +136,12 @@ class ModelRegistry:
             cls = getattr(mod, class_name)
             model = cls().to(self.device)
             model.load_state_dict(
-                torch.load(str(path), map_location=self.device, weights_only=False)
+                torch.load(str(path), map_location=self.device, weights_only=True)
             )
             model.eval()
             self.models[name] = model
             self.loaded.append(name)
-        except Exception as e:
+        except (RuntimeError, FileNotFoundError, ImportError, KeyError) as e:
             logger.warning("Could not load %s: %s", name, e)
             self.missing.append(f"{name} (error)")
 
@@ -145,12 +158,12 @@ class ModelRegistry:
                 n_inputs = cfg.n_inputs
             model = FusionMLP(n_inputs=n_inputs).to(self.device)
             model.load_state_dict(
-                torch.load(str(path), map_location=self.device, weights_only=False)
+                torch.load(str(path), map_location=self.device, weights_only=True)
             )
             model.eval()
             self.models["fusion"] = model
             self.loaded.append("fusion")
-        except Exception as e:
+        except (RuntimeError, FileNotFoundError, ImportError, KeyError) as e:
             logger.warning("Could not load FusionMLP: %s", e)
             self.missing.append("fusion (error)")
 
@@ -162,7 +175,7 @@ class ModelRegistry:
         try:
             from core_models.corefakenet import CorefakeNet
             model = CorefakeNet().to(self.device)
-            ckpt = torch.load(str(path), map_location=self.device, weights_only=False)
+            ckpt = torch.load(str(path), map_location=self.device, weights_only=True)
             if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
                 model.load_state_dict(ckpt["model_state_dict"])
             else:
@@ -172,7 +185,7 @@ class ModelRegistry:
             self.loaded.append("corefakenet")
             epoch = ckpt.get("epoch", "?") if isinstance(ckpt, dict) else "?"
             logger.info("CorefakeNet loaded (epoch %s)", epoch)
-        except Exception as e:
+        except (RuntimeError, FileNotFoundError, ImportError, KeyError) as e:
             logger.warning("Could not load CorefakeNet: %s", e)
             self.missing.append("corefakenet (error)")
 
@@ -202,9 +215,36 @@ class ModelRegistry:
             self.vit_processor = ViTImageProcessor.from_pretrained(model_id)
             self.vit_model.eval()
             self.loaded.append("vit")
-        except Exception as e:
+        except (RuntimeError, FileNotFoundError, ImportError, KeyError) as e:
             logger.warning("Could not load ViT: %s", e)
             self.missing.append("vit")
+
+    def _try_load_wav2vec2_audio(self) -> None:
+        """Load Wav2Vec2-XLSR-300M audio deepfake detector from HuggingFace."""
+        try:
+            from core_models.wav2vec2_audio import Wav2Vec2AudioDetector
+            cfg = self.config.get_model("wav2vec2_audio")
+            model_id = cfg.model_id if cfg else None
+            self.wav2vec2_audio = Wav2Vec2AudioDetector(
+                device=self.device, model_id=model_id,
+            )
+            self.loaded.append("wav2vec2_audio")
+        except (RuntimeError, FileNotFoundError, ImportError, KeyError, OSError) as e:
+            logger.warning("Could not load Wav2Vec2 audio: %s", e)
+            self.missing.append("wav2vec2_audio")
+
+    def _try_load_clip_deepfake(self) -> None:
+        """Load CLIP ViT-L/14 deepfake detector (TorchScript) from HuggingFace."""
+        try:
+            from core_models.clip_deepfake import CLIPDeepfakeDetector
+            cache_dir = str(self.config.models_dir.parent / ".hf_cache")
+            self.clip_deepfake = CLIPDeepfakeDetector(
+                device=self.device, cache_dir=cache_dir,
+            )
+            self.loaded.append("clip")
+        except (RuntimeError, FileNotFoundError, ImportError, KeyError, OSError) as e:
+            logger.warning("Could not load CLIP deepfake: %s", e)
+            self.missing.append("clip")
 
     def _init_video_analyzer(self) -> None:
         try:
@@ -220,19 +260,23 @@ class ModelRegistry:
                 freq_cnn=self.models.get("frequency"),
                 fusion_mlp=self.models.get("fusion"),
                 video_lstm=self.models.get("video_lstm"),
+                clip_deepfake=self.clip_deepfake,
             )
-        except Exception as e:
+        except (RuntimeError, FileNotFoundError, ImportError, KeyError) as e:
             logger.warning("Could not init VideoAnalyzer: %s", e)
 
     def _init_audio_analyzer(self) -> None:
         try:
             from pipeline.audio_analyzer import AudioAnalyzer
-            self.audio_analyzer = AudioAnalyzer(device=self.device)
+            self.audio_analyzer = AudioAnalyzer(
+                device=self.device,
+                wav2vec2_model=self.wav2vec2_audio,
+            )
             if self.audio_analyzer.model_loaded:
                 self.loaded.append("audio")
             else:
                 self.missing.append("audio")
-        except Exception as e:
+        except (RuntimeError, FileNotFoundError, ImportError, KeyError) as e:
             logger.warning("Could not init AudioAnalyzer: %s", e)
 
     def get_status(self) -> dict[str, Any]:
@@ -245,16 +289,24 @@ class ModelRegistry:
 
 
 # ──────────────────────────────────────────────
-# Module-level registry singleton
+# Module-level registry singleton (thread-safe)
 # ──────────────────────────────────────────────
 
 _registry: Optional[ModelRegistry] = None
+_registry_lock = threading.Lock()
 
 
 def get_registry() -> ModelRegistry:
+    """Return the shared ModelRegistry, creating it on first call.
+
+    Uses double-checked locking so that concurrent threads never
+    construct two registries or read a half-initialized instance.
+    """
     global _registry
     if _registry is None:
-        _registry = ModelRegistry()
+        with _registry_lock:
+            if _registry is None:
+                _registry = ModelRegistry()
     return _registry
 
 
@@ -262,15 +314,38 @@ def get_registry() -> ModelRegistry:
 # Score Helpers
 # ──────────────────────────────────────────────
 
-def calibrate_score(score: float, temperature: float = 1.2) -> float:
-    """Apply temperature scaling for model score comparability."""
+def calibrate_score(score: float, temperature: float = 1.0) -> float:
+    """Apply temperature scaling (Platt calibration) for model score comparability.
+
+    NOTE: Temperatures are currently set to 1.0 (identity) because proper
+    calibration requires fitting on a held-out validation set per model.
+    When FusionMLP is loaded, its internal ModelCalibrator provides learned
+    per-model temperatures instead — this function is only used as a
+    fallback in the weighted_avg path.
+
+    To properly calibrate:
+        1. Collect model outputs on a held-out validation set
+        2. Fit temperature via NLL minimization per model
+        3. Update configs/models.json per_model_temperatures with fitted values
+    """
     score = max(min(score, 0.999), 0.001)
     logit = math.log(score / (1 - score))
     return 1.0 / (1.0 + math.exp(-logit / temperature))
 
 
-def forensic_score(img_pil: Image.Image) -> float:
-    """Detect manipulation via noise inconsistency and ELA."""
+def _heuristic_forensic_score(img_pil: Image.Image) -> float:
+    """Heuristic forensic signal based on noise inconsistency and ELA.
+
+    WARNING: This is NOT a trained ML model. It uses hand-crafted feature
+    extraction (Gaussian blur residual variance + JPEG Error Level Analysis)
+    with hardcoded thresholds. It provides a weak supplementary signal but
+    should NOT be weighted equally with trained models in the ensemble.
+
+    When FusionMLP is loaded, this signal is fed as one of 7 inputs — the
+    MLP was trained with these outputs and learns to weight them appropriately.
+    In the weighted_avg fallback, this receives a reduced weight (0.05 vs 0.15+
+    for trained models).
+    """
     import cv2
     from io import BytesIO
 
@@ -307,6 +382,10 @@ def forensic_score(img_pil: Image.Image) -> float:
 
     noise_score = min(max((noise_inconsistency - 0.5) / 0.6, 0.0), 1.0)
     return float(0.6 * noise_score + 0.4 * ela_score)
+
+
+# Public alias for backward compatibility (training scripts, tests)
+forensic_score = _heuristic_forensic_score
 
 
 # ──────────────────────────────────────────────
@@ -399,9 +478,14 @@ def _analyze_image_ensemble(
             scores["face"] = 1.0 - real_prob  # Convert P(real) → P(fake)
             active_models += 1
 
-    # Forensic (heuristic)
-    scores["forensic"] = forensic_score(image_pil)
-    active_models += 1
+        # CLIP ViT-L/14 deepfake detector
+        if reg.clip_deepfake is not None:
+            clip_score = float(reg.clip_deepfake.predict(model_input))
+            scores["clip"] = clip_score
+            active_models += 1
+
+    # Forensic heuristic (NOT a trained model — supplementary signal only)
+    scores["forensic"] = _heuristic_forensic_score(image_pil)
 
     # Frequency fallback
     if "frequency" not in scores and reg.freq_analyzer:
@@ -426,10 +510,19 @@ def _analyze_image_ensemble(
             efficientnet_auth=scores.get("efficientnet", 0.0),
             face=scores.get("face", 0.0),
         )
+        # CLIP is NOT a FusionMLP input (7 fixed inputs) but used as
+        # a post-fusion adjustment when CLIP has high confidence
+        if "clip" in scores:
+            clip_conf = abs(scores["clip"] - 0.5) * 2.0
+            if clip_conf > 0.4:
+                final_risk = 0.8 * final_risk + 0.2 * scores["clip"]
     else:
         fusion_mode = "weighted_avg"
         cal = config.calibration
-        cal_scores = {k: calibrate_score(v, cal.temperature) for k, v in scores.items()}
+        cal_scores = {
+            k: calibrate_score(v, cal.per_model_temperatures.get(k, cal.temperature))
+            for k, v in scores.items()
+        }
 
         use_boosted = (
             has_face and "face" in scores and scores["face"] > 0.6
@@ -440,12 +533,14 @@ def _analyze_image_ensemble(
         weighted_sum = 0.0
         for key, cal_val in cal_scores.items():
             if key in weights:
-                weighted_sum += weights[key] * cal_val
-                total_weight += weights[key]
+                confidence = abs(cal_val - 0.5) * 2.0  # 0=uncertain, 1=confident
+                effective_weight = weights[key] * (0.5 + 0.5 * confidence)
+                weighted_sum += effective_weight * cal_val
+                total_weight += effective_weight
         final_risk = weighted_sum / total_weight if total_weight > 0 else 0.0
 
         # High-confidence override
-        trained_keys = ["vit", "texture", "face", "dino"]
+        trained_keys = ["vit", "texture", "face", "dino", "clip"]
         trained_cal = [cal_scores[k] for k in trained_keys if k in cal_scores]
         if trained_cal:
             max_prob = max(trained_cal)
@@ -475,8 +570,9 @@ def _analyze_image_ensemble(
     confidence = Confidence.from_risk_score(final_risk)
     risk_level = RiskLevel.from_risk_score(final_risk)
 
-    # Model agreement
-    fake_count = sum(1 for v in scores.values() if v > 0.5)
+    # Model agreement (trained models only — excludes forensic heuristic)
+    trained_scores = {k: v for k, v in scores.items() if k != "forensic"}
+    fake_count = sum(1 for v in trained_scores.values() if v > 0.5)
     model_agreement = f"{fake_count}/{active_models} models detect manipulation"
 
     # GradCAM
@@ -488,7 +584,7 @@ def _analyze_image_ensemble(
             eff_model=reg.models.get("efficientnet"),
             dino_model=reg.models.get("dino"),
         )
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError) as e:
         logger.warning("GradCAM failed: %s", e)
 
     # Explainability
@@ -499,17 +595,21 @@ def _analyze_image_ensemble(
         "frequency_prob": scores.get("frequency", 0.0),
         "eff_prob": scores.get("texture", scores.get("efficientnet", 0.0)),
         "dino_prob": scores.get("dino", 0.0),
+        "clip_prob": scores.get("clip"),
     }
     try:
         from utils.explainability import explain_risk
         explanation = explain_risk(final_risk, model_scores_for_explain)
-    except Exception:
+    except (RuntimeError, ValueError, TypeError):
         explanation = ""
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000
 
+    # Ensure all scores are native Python floats (not numpy/torch float32)
+    scores = {k: float(v) for k, v in scores.items()}
+
     return {
-        "risk_score": final_risk,
+        "risk_score": float(final_risk),
         "risk_percent": risk_pct,
         "verdict": verdict.value,
         "confidence": confidence.value,
@@ -568,7 +668,7 @@ def _analyze_image_fast(
     try:
         from utils.explainability import explain_risk
         explanation = explain_risk(final_risk, model_scores_for_explain)
-    except Exception:
+    except (RuntimeError, ValueError, TypeError):
         explanation = ""
 
     # GradCAM
@@ -580,7 +680,7 @@ def _analyze_image_fast(
             eff_model=reg.models.get("efficientnet"),
             dino_model=reg.models.get("dino"),
         )
-    except Exception:
+    except (RuntimeError, ValueError, TypeError):
         pass
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -793,7 +893,7 @@ def analyze_multimodal(
              for k, v in modality_scores.items()},
             final_score,
         )
-    except Exception:
+    except (RuntimeError, ValueError, TypeError):
         explanation = ""
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000

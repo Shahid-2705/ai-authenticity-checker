@@ -1,77 +1,166 @@
-import React, { useCallback, useState } from 'react';
-import { UploadCloud } from 'lucide-react';
+import React, { useCallback, useState, useRef, useEffect } from 'react';
+import { UploadCloud, Check, RefreshCw, AlertCircle } from 'lucide-react';
+import { isFileAccepted } from '../utils/format';
 
-export default function UploadZone({ onFileSelect, accept = "image/*", label = "Drag & drop file here or click to browse" }) {
+const FORMAT_LABELS = {
+  'image/*': ['JPG', 'PNG', 'WEBP'],
+  'video/*': ['MP4', 'AVI', 'MOV'],
+  'audio/*': ['WAV', 'MP3', 'FLAC'],
+};
+
+export default function UploadZone({
+  onFileSelect,
+  accept = 'image/*',
+  label = 'Drag & drop or click to browse',
+  initialFile = null,
+  maxSizeMB = 500,
+}) {
   const [isDragActive, setIsDragActive] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [rejected, setRejected] = useState(false);
+  const [sizeError, setSizeError] = useState(false);
+  const blobUrlRef = useRef(null);
 
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    setIsDragActive(false);
-    const file = e.dataTransfer.files[0];
-    if (file) {
-      handleFile(file);
-    }
+  const badges = FORMAT_LABELS[accept] || ['JPG', 'PNG', 'MP4', 'WAV'];
+
+  // Clean up blob URL on unmount or when preview changes
+  useEffect(() => {
+    return () => {
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
+    };
   }, []);
 
-  const handleChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      handleFile(file);
-    }
-  };
+  const handleFile = useCallback(
+    (file) => {
+      setRejected(false);
+      setSizeError(false);
 
-  const handleFile = (file) => {
-    onFileSelect(file);
-    // Create preview if it's an image or video
-    if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
-      const objectUrl = URL.createObjectURL(file);
-      setPreview({ url: objectUrl, type: file.type });
-    } else {
-      setPreview({ name: file.name, type: file.type });
-    }
-  };
+      // Client-side type validation
+      if (!isFileAccepted(file, accept)) {
+        setRejected(true);
+        setTimeout(() => setRejected(false), 3000);
+        return;
+      }
+
+      // Client-side size validation
+      if (maxSizeMB > 0 && file.size > maxSizeMB * 1024 * 1024) {
+        setSizeError(true);
+        setTimeout(() => setSizeError(false), 4000);
+        return;
+      }
+
+      // Revoke previous blob URL
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
+
+      onFileSelect(file);
+
+      if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+        const url = URL.createObjectURL(file);
+        blobUrlRef.current = url;
+        setPreview({ url, type: file.type, name: file.name });
+      } else {
+        setPreview({ name: file.name, type: file.type });
+      }
+    },
+    [accept, onFileSelect, maxSizeMB],
+  );
+
+  // Accept an initial file from drag-drop on Dashboard
+  useEffect(() => {
+    if (initialFile) handleFile(initialFile);
+  }, [initialFile, handleFile]);
+
+  const handleDrop = useCallback(
+    (e) => {
+      e.preventDefault();
+      setIsDragActive(false);
+      const file = e.dataTransfer.files[0];
+      if (file) handleFile(file);
+    },
+    [handleFile],
+  );
+
+  const handleChange = useCallback(
+    (e) => {
+      const file = e.target.files[0];
+      if (file) handleFile(file);
+    },
+    [handleFile],
+  );
 
   return (
     <div
       onDragOver={(e) => { e.preventDefault(); setIsDragActive(true); }}
       onDragLeave={() => setIsDragActive(false)}
       onDrop={handleDrop}
-      className={`relative w-full h-64 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all duration-300 overflow-hidden cursor-pointer
-        ${isDragActive 
-          ? 'border-accent-cyan bg-[rgba(0,240,255,0.05)] shadow-[inset_0_0_20px_rgba(0,240,255,0.1)]' 
-          : 'border-border-subtle hover:border-border-glow bg-background-card hover:bg-background-card-hover'
-        }`}
+      className={`relative w-full rounded-xl flex flex-col items-center justify-center overflow-hidden cursor-pointer min-h-[200px] border-2 border-dashed transition-colors duration-200 ${
+        rejected || sizeError
+          ? 'border-risk-critical bg-risk-criticalDim'
+          : isDragActive
+            ? 'border-accent bg-[rgba(59,130,246,0.05)]'
+            : 'border-border-mid bg-bg-inset'
+      }`}
     >
-      <input 
-        type="file" 
+      <input
+        type="file"
         accept={accept}
-        onChange={handleChange} 
+        onChange={handleChange}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+        aria-label={label}
       />
-      
-      {preview ? (
-        <div className="absolute inset-0 w-full h-full bg-background z-0">
-          {preview.type.startsWith('image/') ? (
-            <img src={preview.url} alt="Preview" className="w-full h-full object-contain opacity-40 blur-sm" />
-          ) : preview.type.startsWith('video/') ? (
-            <video src={preview.url} className="w-full h-full object-contain opacity-40 blur-sm" />
-          ) : null}
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center z-20">
-            <div className="bg-background-card backdrop-blur-md rounded-xl p-4 border border-border-subtle shadow-lg">
-              <p className="text-accent-cyan font-bold mb-1">File Added</p>
-              <p className="text-sm text-text-primary truncate max-w-xs">{preview.name || "Media File"}</p>
-              <p className="text-xs text-text-muted mt-2">Click or drag a new file to replace</p>
-            </div>
+
+      {rejected || sizeError ? (
+        <div className="flex flex-col items-center justify-center z-20 text-center px-6 py-6">
+          <AlertCircle size={28} className="mb-2 text-risk-critical" />
+          <p className="text-sm font-medium text-risk-critical">
+            {sizeError ? 'File too large' : 'Unsupported file type'}
+          </p>
+          <p className="text-xs mt-1 text-text-2">
+            {sizeError
+              ? `Maximum file size is ${maxSizeMB} MB`
+              : `Please select a ${accept.replace('/*', '')} file`}
+          </p>
+        </div>
+      ) : preview ? (
+        <div className="flex flex-col items-center justify-center z-20 text-center px-6 py-6">
+          <div className="flex items-center gap-2">
+            <Check size={14} className="text-risk-clear" />
+            <span className="text-sm font-medium truncate max-w-[220px] text-text-1">
+              {preview.name || 'File loaded'}
+            </span>
           </div>
+          <p className="text-xs mt-2 flex items-center gap-1 text-text-2">
+            <RefreshCw size={10} /> Drop new file to replace
+          </p>
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center z-20 pointer-events-none text-center px-4">
-          <div className="w-16 h-16 rounded-full bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)] flex items-center justify-center mb-4 transition-transform duration-300 group-hover:scale-110">
-            <UploadCloud size={32} className={isDragActive ? "text-accent-cyan" : "text-text-secondary"} />
+        <div className="flex flex-col items-center justify-center z-20 pointer-events-none text-center px-6 py-6">
+          <UploadCloud
+            size={30}
+            className={`mb-3 ${isDragActive ? 'text-accent' : 'text-text-3'}`}
+          />
+          <p className="text-sm font-medium text-text-2">
+            {label}
+          </p>
+          <p className="text-xs mt-1 text-text-3">
+            Supports high-res forensic analysis
+          </p>
+          <div className="flex gap-1.5 mt-3">
+            {badges.map((ext) => (
+              <span
+                key={ext}
+                className="text-[10px] px-2 py-0.5 rounded font-mono bg-bg-elevated text-text-3 border border-border-dim"
+              >
+                {ext}
+              </span>
+            ))}
           </div>
-          <p className="text-text-primary font-medium">{label}</p>
-          <p className="text-xs text-text-muted mt-2">Supports high-res forensic analysis</p>
         </div>
       )}
     </div>

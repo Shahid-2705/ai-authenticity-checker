@@ -195,7 +195,7 @@ def score_frame(pil_img, comp, device):
             pass
 
     try:
-        from app import forensic_score
+        from core.pipeline import forensic_score
         scores["forensic"] = forensic_score(pil_img)
     except Exception:
         pass

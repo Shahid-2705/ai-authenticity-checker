@@ -7,41 +7,67 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: {
-          DEFAULT: '#0A0E1A',
-          card: 'rgba(255, 255, 255, 0.04)',
-          'card-hover': 'rgba(255, 255, 255, 0.07)',
+        // Single source of truth: CSS custom properties in index.css :root
+        bg: {
+          void:     'var(--bg-void)',
+          base:     'var(--bg-base)',
+          card:     'var(--bg-card)',
+          elevated: 'var(--bg-elevated)',
+          inset:    'var(--bg-inset)',
         },
         border: {
-          subtle: 'rgba(255, 255, 255, 0.08)',
-          glow: 'rgba(0, 240, 255, 0.15)',
+          dim:  'var(--border-dim)',
+          mid:  'var(--border-mid)',
+          glow: 'var(--border-glow)',
         },
         accent: {
-          cyan: '#00F0FF',
-          violet: '#A855F7',
-          pink: '#EC4899',
-          green: '#10B981',
-          amber: '#F59E0B',
+          DEFAULT: 'var(--accent)',
+          dim:     'var(--accent-dim)',
+          glow:    'var(--accent-glow)',
+          2:       'var(--accent-2)',
         },
         text: {
-          primary: '#E2E8F0',
-          secondary: '#94A3B8',
-          muted: '#64748B',
+          1: 'var(--text-1)',
+          2: 'var(--text-2)',
+          3: 'var(--text-3)',
         },
         risk: {
-          low: '#10B981',
-          medium: '#F59E0B',
-          high: '#EC4899',
-        }
+          clear:       'var(--risk-clear)',
+          caution:     'var(--risk-caution)',
+          critical:    'var(--risk-critical)',
+          clearDim:    'rgba(52,211,153,0.10)',
+          cautionDim:  'rgba(251,191,36,0.10)',
+          criticalDim: 'rgba(251,113,133,0.10)',
+        },
       },
       boxShadow: {
-        'glow-cyan': '0 0 20px rgba(0, 240, 255, 0.15)',
-        'glow-violet': '0 0 20px rgba(168, 85, 247, 0.15)',
-        'glow-pink': '0 0 20px rgba(236, 72, 153, 0.15)',
+        'card':       '0 2px 8px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.03)',
+        'card-hover': '0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(59,130,246,0.20), 0 0 20px rgba(59,130,246,0.15)',
+        'modal':      '0 24px 64px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05)',
+        'glow-blue':   '0 0 20px rgba(59,130,246,0.20)',
+        'glow-cyan':   '0 0 20px rgba(6,182,212,0.10)',
+        'glow-green':  '0 0 12px rgba(52,211,153,0.15)',
+        'glow-red':    '0 0 12px rgba(251,113,133,0.15)',
+        'glow-amber':  '0 0 12px rgba(251,191,36,0.15)',
       },
       fontFamily: {
-        sans: ['Inter', 'Segoe UI', 'system-ui', 'sans-serif'],
-      }
+        sans:    ['Inter', 'system-ui', 'sans-serif'],
+        mono:    ['"JetBrains Mono"', '"Fira Code"', 'monospace'],
+        display: ['"Space Grotesk"', 'Inter', 'sans-serif'],
+      },
+      borderRadius: {
+        DEFAULT: '10px',
+      },
+      animation: {
+        'fade-in':  'fadeIn 0.35s ease-out',
+        'slide-up': 'slideUp 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
+        'shimmer':  'shimmer 2s linear infinite',
+      },
+      keyframes: {
+        fadeIn:  { '0%': { opacity: 0 }, '100%': { opacity: 1 } },
+        slideUp: { '0%': { opacity: 0, transform: 'translateY(12px)' }, '100%': { opacity: 1, transform: 'translateY(0)' } },
+        shimmer: { '0%': { backgroundPosition: '-200% 0' }, '100%': { backgroundPosition: '200% 0' } },
+      },
     },
   },
   plugins: [],
