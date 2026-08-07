@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
 import { Mic, Volume2, ShieldCheck, X } from 'lucide-react';
-import { fadeUp, fadeIn } from '../utils/animations';
 import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UploadZone from '../components/UploadZone';
@@ -34,7 +32,7 @@ export default function AudioAnalysis() {
   }, [clearAnalysis]);
 
   return (
-    <motion.div initial="hidden" animate="visible" variants={fadeUp} className="space-y-6">
+    <div className="space-y-6">
       <PageHeader
         icon={Mic}
         title="Audio Analysis"
@@ -84,7 +82,7 @@ export default function AudioAnalysis() {
               {error}
             </div>
           ) : results ? (
-            <motion.div variants={fadeIn} initial="hidden" animate="visible" className="flex flex-col items-center space-y-4">
+            <div className="flex flex-col items-center space-y-4">
               <div className="flex flex-wrap justify-center gap-6">
                 <RiskGauge percentage={results.risk_percent || 0} label="AI Risk" size={150} />
                 <RiskGauge percentage={results.authenticity_percentage || 0} label="Authenticity" size={150} />
@@ -128,7 +126,7 @@ export default function AudioAnalysis() {
                   </div>
                 </div>
               )}
-            </motion.div>
+            </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 space-y-2 text-text-3">
               <ShieldCheck size={22} className="opacity-30" />
@@ -146,6 +144,6 @@ export default function AudioAnalysis() {
         onConfirm={handleCancelConfirm}
         onCancel={() => setConfirmCancel(false)}
       />
-    </motion.div>
+    </div>
   );
 }

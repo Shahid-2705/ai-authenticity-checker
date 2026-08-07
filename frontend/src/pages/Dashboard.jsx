@@ -1,12 +1,11 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { motion } from 'framer-motion';
-import { Image, Film, Mic, Layers, Clock, Shield, Cpu, Upload, FileSearch, ArrowUpRight } from 'lucide-react';
+import { Film, Mic, Layers, Clock, Cpu, Upload, FileSearch, ArrowUpRight } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import useForensicStore from '../store/useForensicStore';
 import EmptyDashboard from '../components/EmptyDashboard';
-import { staggerFadeUp } from '../utils/animations';
-import { getRiskColorRaw, getRiskBg, getRiskLevel, normalizeScore } from '../utils/risk';
+import { getRiskColorRaw, getRiskBg, normalizeScore } from '../utils/risk';
 import { formatRelativeTime, detectMediaRoute } from '../utils/format';
+import { Image } from 'lucide-react';
 
 const MEDIA_ICONS = { image: Image, video: Film, audio: Mic, multimodal: Layers };
 const ANALYSIS_CARDS = [
@@ -17,9 +16,9 @@ const ANALYSIS_CARDS = [
 ];
 const STAT_DEFS = (totals, models, cleared) => [
   { label: 'Total Scans', value: totals, icon: FileSearch, iconClass: 'text-accent' },
-  { label: 'Avg Risk', value: null, icon: Shield, iconClass: 'text-risk-caution' },
+  { label: 'Avg Risk', value: null, icon: Image, iconClass: 'text-risk-caution' },
   { label: 'Models Active', value: models, icon: Cpu, iconClass: 'text-accent' },
-  { label: 'Cleared', value: cleared, icon: Shield, iconClass: 'text-risk-clear' },
+  { label: 'Cleared', value: cleared, icon: Image, iconClass: 'text-risk-clear' },
 ];
 
 export default function Dashboard() {
@@ -60,13 +59,13 @@ export default function Dashboard() {
   /* Empty state */
   if (historyTotal === 0 && !isStatusLoading) {
     return (
-      <motion.div initial="hidden" animate="visible" className="space-y-5">
-        <motion.div variants={staggerFadeUp} custom={0}>
+      <div className="space-y-5">
+        <div>
           <h1 className="font-display text-xl font-bold tracking-tight gradient-text">Forensics Command Center</h1>
           <p className="text-xs mt-0.5 text-text-3">AI-powered deepfake detection & media authentication</p>
-        </motion.div>
+        </div>
         <EmptyDashboard />
-      </motion.div>
+      </div>
     );
   }
 
@@ -76,35 +75,38 @@ export default function Dashboard() {
   stats[1].value = `${avgRisk}%`;
 
   return (
-    <motion.div initial="hidden" animate="visible" className="space-y-5"
+    <div className="space-y-5"
       onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
       onDragLeave={() => setDragOver(false)} onDrop={handleDrop}>
 
       {/* Header */}
-      <motion.div variants={staggerFadeUp} custom={0} className="flex items-start justify-between flex-wrap gap-4">
+      <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="font-display text-xl font-bold tracking-tight gradient-text">Forensics Command Center</h1>
           <p className="text-xs mt-0.5 text-text-3">AI-powered deepfake detection & media authentication</p>
         </div>
         <span className="text-xs font-mono text-text-3">{modelsOnline}/{totalModels} models online</span>
-      </motion.div>
+      </div>
 
       {/* Stat cards */}
-      <motion.div variants={staggerFadeUp} custom={1} className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {stats.map(({ label, value, icon: Icon, iconClass }) => (
-          <div key={label} className="card">
-            <div className="flex items-center gap-2 mb-2">
-              <Icon size={14} className={iconClass} />
-              <span className="label-tag">{label}</span>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {stats.map(({ label, value, icon, iconClass }) => {
+          const Icon = icon;
+          return (
+            <div key={label} className="card">
+              <div className="flex items-center gap-2 mb-2">
+                <Icon size={14} className={iconClass} />
+                <span className="label-tag">{label}</span>
+              </div>
+              <p className="font-display text-lg font-bold text-text-1">{value}</p>
             </div>
-            <p className="font-display text-lg font-bold text-text-1">{value}</p>
-          </div>
-        ))}
-      </motion.div>
+          );
+        })}
+      </div>
 
       {/* Risk breakdown bar */}
       {historyTotal > 0 && (
-        <motion.div variants={staggerFadeUp} custom={2} className="card">
+        <div className="card">
           <span className="label-tag mb-3 block">Risk Distribution</span>
           <div className="flex gap-1 h-3 rounded-full overflow-hidden">
             <div className="rounded-l-full bg-risk-clear" style={{ width: `${(riskCounts.clear / barTotal) * 100}%` }} />
@@ -121,11 +123,11 @@ export default function Dashboard() {
               </span>
             ))}
           </div>
-        </motion.div>
+        </div>
       )}
 
       {/* Quick upload + analysis cards */}
-      <motion.div variants={staggerFadeUp} custom={3} className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div
           className={`card flex flex-col items-center justify-center text-center cursor-pointer min-h-[160px] border-dashed ${dragOver ? 'border-accent' : ''}`}
           onClick={() => fileInputRef.current?.click()}
@@ -145,24 +147,27 @@ export default function Dashboard() {
           <p className="text-xs mt-1 text-text-3">Drop any file or click to browse</p>
         </div>
         <div className="lg:col-span-2 grid grid-cols-2 gap-3">
-          {ANALYSIS_CARDS.map(({ to, label, desc, icon: Icon }) => (
-            <Link key={to} to={to} className="group card card-hover flex flex-col no-underline">
-              <div className="flex items-center justify-between mb-2">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent-dim">
-                  <Icon size={15} className="text-accent" />
+          {ANALYSIS_CARDS.map(({ to, label, desc, icon }) => {
+            const Icon = icon;
+            return (
+              <Link key={to} to={to} className="group card card-hover flex flex-col no-underline">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent-dim">
+                    <Icon size={15} className="text-accent" />
+                  </div>
+                  <ArrowUpRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity text-accent" />
                 </div>
-                <ArrowUpRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity text-accent" />
-              </div>
-              <span className="text-sm font-semibold text-text-1">{label}</span>
-              <span className="text-xs mt-0.5 text-text-3">{desc}</span>
-            </Link>
-          ))}
+                <span className="text-sm font-semibold text-text-1">{label}</span>
+                <span className="text-xs mt-0.5 text-text-3">{desc}</span>
+              </Link>
+            );
+          })}
         </div>
-      </motion.div>
+      </div>
 
       {/* Recent scans table */}
       {recentScans.length > 0 && (
-        <motion.div variants={staggerFadeUp} custom={4} className="card overflow-hidden !p-0">
+        <div className="card overflow-hidden !p-0">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border-dim">
             <div className="flex items-center gap-2">
               <Clock size={13} className="text-accent" />
@@ -199,8 +204,8 @@ export default function Dashboard() {
               })}
             </tbody>
           </table>
-        </motion.div>
+        </div>
       )}
-    </motion.div>
+    </div>
   );
 }

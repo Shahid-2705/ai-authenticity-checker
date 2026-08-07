@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
 import { Clock, Filter, Image, Film, Mic, Layers, ChevronRight } from 'lucide-react';
-import { fadeUp } from '../utils/animations';
 import { getRiskColorRaw, getRiskBg, normalizeScore } from '../utils/risk';
 import { formatShortDateTime } from '../utils/format';
 import useForensicStore from '../store/useForensicStore';
@@ -135,7 +133,7 @@ export default function History() {
   };
 
   return (
-    <motion.div initial="hidden" animate="visible" variants={fadeUp} className="space-y-5">
+    <div className="space-y-5">
       <PageHeader
         icon={Clock}
         title="Analysis History"
@@ -329,6 +327,6 @@ export default function History() {
           </button>
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { CheckCircle, AlertTriangle, Info, X } from 'lucide-react';
 import useToastStore from '../store/useToastStore';
 
@@ -26,12 +26,8 @@ export default function Toaster() {
           const style = STYLES[toast.type] || STYLES.info;
 
           return (
-            <motion.div
+            <div
               key={toast.id}
-              initial={{ opacity: 0, y: 20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 10, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
               className={`pointer-events-auto flex items-start gap-2.5 px-4 py-3 rounded-lg border text-sm shadow-lg ${style}`}
             >
               <Icon size={16} className="flex-shrink-0 mt-0.5" />
@@ -43,7 +39,7 @@ export default function Toaster() {
               >
                 <X size={14} />
               </button>
-            </motion.div>
+            </div>
           );
         })}
       </AnimatePresence>

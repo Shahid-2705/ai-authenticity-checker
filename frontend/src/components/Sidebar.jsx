@@ -1,6 +1,5 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import { Image, Film, Mic, Layers, LayoutDashboard, Clock, Activity, LogOut } from 'lucide-react';
 import useForensicStore from '../store/useForensicStore';
 import useAuthStore from '../store/useAuthStore';
@@ -16,7 +15,8 @@ const NAV_LINKS = [
   { to: '/history',    icon: Clock,           label: 'History' },
 ];
 
-function SidebarLink({ to, exact, icon: Icon, label, onClick }) {
+function SidebarLink({ to, exact, icon, label, onClick }) {
+  const Icon = icon;
   return (
     <NavLink
       to={to}
@@ -24,19 +24,8 @@ function SidebarLink({ to, exact, icon: Icon, label, onClick }) {
       className={({ isActive }) => `nav-item w-full ${isActive ? 'active' : ''}`}
       onClick={onClick}
     >
-      {({ isActive }) => (
-        <>
-          {isActive && (
-            <motion.span
-              layoutId="sidebar-active"
-              className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-full bg-accent"
-              transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-            />
-          )}
-          <Icon size={15} className="flex-shrink-0" />
-          <span>{label}</span>
-        </>
-      )}
+      <Icon size={15} className="flex-shrink-0" />
+      <span>{label}</span>
     </NavLink>
   );
 }

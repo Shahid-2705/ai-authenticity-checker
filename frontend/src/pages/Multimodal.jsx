@@ -1,7 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { motion } from 'framer-motion';
 import { Layers, Zap, ShieldCheck, X } from 'lucide-react';
-import { fadeUp, fadeIn } from '../utils/animations';
 import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UploadZone from '../components/UploadZone';
@@ -33,7 +31,7 @@ export default function Multimodal() {
   }, [clearAnalysis]);
 
   return (
-    <motion.div initial="hidden" animate="visible" variants={fadeUp} className="space-y-6">
+    <div className="space-y-6">
       <PageHeader
         icon={Layers}
         title="Multimodal Fusion"
@@ -82,7 +80,7 @@ export default function Multimodal() {
 
       {/* Results */}
       {results && (
-        <motion.div variants={fadeIn} initial="hidden" animate="visible" className="card">
+        <div className="card">
           <p className="label-tag mb-5 text-center">Fusion Report</p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
@@ -128,7 +126,7 @@ export default function Multimodal() {
               )}
             </div>
           </div>
-        </motion.div>
+        </div>
       )}
 
       {/* Empty state */}
@@ -147,6 +145,6 @@ export default function Multimodal() {
         onConfirm={handleCancelConfirm}
         onCancel={() => setConfirmCancel(false)}
       />
-    </motion.div>
+    </div>
   );
 }

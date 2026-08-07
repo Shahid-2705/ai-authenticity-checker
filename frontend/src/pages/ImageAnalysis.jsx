@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
 import { Image, Scan, ShieldCheck, X } from 'lucide-react';
-import { fadeUp } from '../utils/animations';
 import useForensicStore from '../store/useForensicStore';
 import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -65,7 +63,7 @@ export default function ImageAnalysis() {
     : [];
 
   return (
-    <motion.div initial="hidden" animate="visible" variants={fadeUp} className="space-y-6">
+    <div className="space-y-6">
       <PageHeader
         icon={Image}
         title="Image Analysis"
@@ -182,7 +180,7 @@ export default function ImageAnalysis() {
                 <p className="text-sm">Upload an image and run analysis to see results.</p>
               </div>
             ) : (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+              <div className="space-y-4">
                 <div className="flex flex-col items-center">
                   <RiskGauge percentage={results.risk_percent} />
 
@@ -219,7 +217,7 @@ export default function ImageAnalysis() {
                     </p>
                   </div>
                 )}
-              </motion.div>
+              </div>
             )}
           </div>
         </div>
@@ -238,6 +236,6 @@ export default function ImageAnalysis() {
         onConfirm={handleCancelConfirm}
         onCancel={() => setConfirmCancel(false)}
       />
-    </motion.div>
+    </div>
   );
 }

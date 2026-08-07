@@ -1,7 +1,5 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 import { CheckCircle, XCircle, Cpu, Zap, Layers, Info, RefreshCw, Activity } from 'lucide-react';
-import { fadeUp } from '../utils/animations';
 import PageHeader from '../components/PageHeader';
 import useForensicStore from '../store/useForensicStore';
 
@@ -9,7 +7,7 @@ export default function SystemStatus() {
   const { systemStatus, isStatusLoading, statusError, fetchStatus } = useForensicStore();
 
   return (
-    <motion.div initial="hidden" animate="visible" variants={fadeUp} className="space-y-6">
+    <div className="space-y-6">
       <PageHeader
         icon={Activity}
         title="System Status"
@@ -90,27 +88,30 @@ export default function SystemStatus() {
             value: systemStatus?.fusion_mlp_available ? 'LEARNED' : 'HEURISTIC',
             ok: systemStatus?.fusion_mlp_available,
           },
-        ].map(({ icon: Icon, title, value, ok }) => (
-          <div key={title} className="card">
-            <div className="flex items-center gap-2 mb-2">
-              <Icon size={16} className="text-accent" />
-              <span className="label-tag">{title}</span>
+        ].map(({ icon, title, value, ok }) => {
+          const Icon = icon;
+          return (
+            <div key={title} className="card">
+              <div className="flex items-center gap-2 mb-2">
+                <Icon size={16} className="text-accent" />
+                <span className="label-tag">{title}</span>
+              </div>
+              {ok !== undefined ? (
+                <span
+                  className={`inline-block px-3 py-1 rounded text-xs font-bold border ${
+                    ok
+                      ? 'bg-risk-clearDim text-risk-clear border-[rgba(52,211,153,0.25)]'
+                      : 'bg-risk-criticalDim text-risk-critical border-[rgba(251,113,133,0.25)]'
+                  }`}
+                >
+                  {value}
+                </span>
+              ) : (
+                <p className="text-lg font-semibold uppercase text-text-1">{value}</p>
+              )}
             </div>
-            {ok !== undefined ? (
-              <span
-                className={`inline-block px-3 py-1 rounded text-xs font-bold border ${
-                  ok
-                    ? 'bg-risk-clearDim text-risk-clear border-[rgba(52,211,153,0.25)]'
-                    : 'bg-risk-criticalDim text-risk-critical border-[rgba(251,113,133,0.25)]'
-                }`}
-              >
-                {value}
-              </span>
-            ) : (
-              <p className="text-lg font-semibold uppercase text-text-1">{value}</p>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* API Info — values derived from env / status response where possible */}
@@ -134,6 +135,6 @@ export default function SystemStatus() {
           ))}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

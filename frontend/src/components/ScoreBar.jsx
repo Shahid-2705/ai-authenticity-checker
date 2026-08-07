@@ -1,5 +1,4 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 import { getRiskColorRaw, normalizeScore } from '../utils/risk';
 
 export default function ScoreBar({ name, score }) {
@@ -16,12 +15,9 @@ export default function ScoreBar({ name, score }) {
         </span>
       </div>
       <div className="h-1.5 w-full rounded-full overflow-hidden bg-white/[0.06]">
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{ width: `${clamped}%` }}
-          transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+        <div
           className="h-full rounded-full"
-          style={{ background: color }}
+          style={{ background: color, width: `${clamped}%` }}
         />
       </div>
     </div>

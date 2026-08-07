@@ -4,7 +4,7 @@ const MAX_TOASTS = 5;
 let nextId = 0;
 const timers = new Map();
 
-const useToastStore = create((set, get) => ({
+const useToastStore = create((set) => ({
   toasts: [],
 
   addToast: (message, type = 'info', duration = 4000) => {
