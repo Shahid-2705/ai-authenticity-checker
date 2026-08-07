@@ -228,6 +228,7 @@ async def api_analyze_video(
     file: UploadFile = File(...),
     fps: float = Query(1.0, ge=0.5, le=30),
     aggregation: str = Query("weighted_avg"),
+    mode: str = Query("ensemble", pattern="^(ensemble|fast)$"),
     current_user: Optional[dict] = Depends(get_current_user),
 ):
     """Analyze an uploaded video for deepfake indicators."""
@@ -244,7 +245,8 @@ async def api_analyze_video(
             tmp_path = tmp.name
 
         result = await _run_with_timeout(
-            analyze_video, TIMEOUT_VIDEO, tmp_path, fps=fps, aggregation=aggregation,
+            analyze_video, TIMEOUT_VIDEO, tmp_path,
+            fps=fps, aggregation=aggregation, mode=mode,
         )
     finally:
         _safe_tmp_remove(tmp_path)
