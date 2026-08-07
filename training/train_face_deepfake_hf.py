@@ -17,11 +17,10 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torchvision import transforms
-from datasets import load_dataset
-from PIL import Image, ImageFilter
-import numpy as np
+from PIL import Image
 
 from core_models.face_deepfake_model import FaceDeepfakeModel
+from training.dataset_portraits import load_portrait_dataset
 
 # ---------------- CONFIG ----------------
 BATCH_SIZE = 16
@@ -105,45 +104,30 @@ def main():
         )
     ])
 
-    # -------- Load dataset via streaming (balanced) --------
-    print("Loading HuggingFace dataset (streaming)...")
-    stream = load_dataset(
-        "JamieWithofs/Deepfake-and-real-images",
-        split="train",
-        streaming=True
+    # -------- Load dataset via the shared multi-source loader --------
+    # This model's own loader used to pull from JamieWithofs/Deepfake-and-
+    # real-images - the exact source dropped from PORTRAIT_SOURCES project-
+    # wide for returning 0 fake samples out of 20,000+ scanned in one run.
+    # Now pulls from PORTRAIT_SOURCES (2 GAN-style HF-streaming sources)
+    # PLUS OpenRL/DeepFakeFace (diffusion-generated: SD Inpainting/text2img,
+    # InsightFace) - training/eval_image_benchmark.py found the whole
+    # ensemble at 30.8% accuracy on diffusion fakes vs 83-97% on real
+    # photos, and none of this model's prior training data was diffusion-
+    # generated at all.
+    # face_align=False: tried True on the theory that InsightFace fakes
+    # (face-swaps onto the same real IMDB-WIKI photos as the real baseline -
+    # see training/diagnose_insight.py) would be easier to catch with a
+    # tight face crop isolating the manipulated region. Measured result was
+    # the opposite: InsightFace accuracy dropped 6.7%->3.3% and inpainting
+    # dropped too (training/eval_image_benchmark.py, round 4 vs round 3) -
+    # a tight crop likely excludes the blend boundary itself, which sits at
+    # the hairline/jaw/neck edge just outside it, and losing the
+    # complementary whole-image signal across 3 of 7 fusion inputs hurt
+    # more than the crop helped. Reverted.
+    print("Loading portrait dataset (GAN sources + diffusion source)...")
+    train_data, val_data = load_portrait_dataset(
+        max_samples=MAX_SAMPLES, train_split=TRAIN_SPLIT, face_align=False,
     )
-
-    per_class = MAX_SAMPLES // 2
-    print(f"Collecting {per_class} samples per class ({MAX_SAMPLES} total)...")
-    class_buckets = {0: [], 1: []}  # 0=Fake, 1=Real
-    total_seen = 0
-    last_printed = 0
-    for sample in stream:
-        label = int(sample["label"])  # 0=Fake, 1=Real
-        if len(class_buckets[label]) < per_class:
-            img = sample["image"].convert("RGB")
-            class_buckets[label].append((img, float(label)))
-        total_seen += 1
-        collected = len(class_buckets[0]) + len(class_buckets[1])
-        if collected >= last_printed + 500:
-            last_printed = collected
-            print(f"  collected {collected}/{MAX_SAMPLES} (Fake: {len(class_buckets[0])}, Real: {len(class_buckets[1])}, scanned: {total_seen})")
-        if total_seen % 10000 == 0 and collected == last_printed:
-            print(f"  scanning... {total_seen} samples seen (Fake: {len(class_buckets[0])}, Real: {len(class_buckets[1])})")
-        if len(class_buckets[0]) >= per_class and len(class_buckets[1]) >= per_class:
-            break
-
-    samples = class_buckets[0] + class_buckets[1]
-    print(f"Collected {len(samples)} samples (Fake: {len(class_buckets[0])}, Real: {len(class_buckets[1])}) from {total_seen} streamed")
-
-    # Shuffle before split
-    random.seed(42)
-    random.shuffle(samples)
-
-    # -------- Train / Val split --------
-    split = int(len(samples) * TRAIN_SPLIT)
-    train_data = samples[:split]
-    val_data = samples[split:]
 
     print(f"Train samples: {len(train_data)}")
     print(f"Val samples  : {len(val_data)}")

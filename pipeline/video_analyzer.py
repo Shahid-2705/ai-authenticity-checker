@@ -266,7 +266,6 @@ class FrequencyAnalyzer:
         AI images tend to have LESS high-frequency content.
         Lower ratio → more likely AI → higher score.
         """
-        total_energy = magnitude.sum() + 1e-8
         h, w = magnitude.shape
 
         # Create radial distance map
@@ -518,12 +517,12 @@ class ModelEnsemble:
         if self.fusion_mlp is not None:
             frame_risk = self.fusion_mlp.predict(
                 vit=vit_prob,
-                efficientnet=eff_prob,
+                texture=texture_prob,
                 forensic=forensic_prob,
                 frequency=freq_display,
-                face=face_prob,
                 dino=dino_prob,
-                texture=texture_prob,
+                efficientnet_auth=eff_prob,
+                face=face_prob,
             )
             # CLIP post-fusion adjustment (not a FusionMLP input)
             if self.clip_deepfake is not None:
@@ -706,7 +705,7 @@ class VideoAnalyzer:
     def __init__(self, dino_model, eff_model, face_model, device,
                  vit_model=None, vit_processor=None,
                  texture_model=None, freq_cnn=None, fusion_mlp=None,
-                 clip_deepfake=None):
+                 video_lstm=None, clip_deepfake=None):
         self.ensemble = ModelEnsemble(
             dino_model, eff_model, face_model, device,
             vit_model=vit_model, vit_processor=vit_processor,
@@ -715,6 +714,10 @@ class VideoAnalyzer:
         )
         self.face_extractor = FaceExtractor()
         self.temporal = TemporalAnalyzer(window_size=10)
+        # Learned replacement for TemporalAnalyzer's heuristic adjustment.
+        # None-safe: falls back to the heuristic-only behavior below when
+        # models/video_lstm.pth hasn't been trained yet.
+        self.video_lstm = video_lstm
 
     def analyze(self, video_path, fps=6, aggregation="weighted_avg",
                 progress_callback=None):
@@ -783,6 +786,18 @@ class VideoAnalyzer:
             frame_results, aggregation
         )
 
+        # Learned temporal signal (blended in when models/video_lstm.pth
+        # exists; identical behavior to before when it doesn't).
+        lstm_risk = None
+        if self.video_lstm is not None and len(frame_results) >= 3:
+            try:
+                lstm_risk = self.video_lstm.predict_window(frame_results)
+                avg_risk = 0.5 * avg_risk + 0.5 * lstm_risk
+                prediction = "FAKE" if avg_risk > 0.5 else "REAL"
+                confidence = abs(2 * avg_risk - 1)
+            except Exception:
+                lstm_risk = None  # fall back to heuristic-only result
+
         # Final temporal summary (from last window)
         final_temporal = temporal_snapshots[-1] if temporal_snapshots else {}
 
@@ -805,6 +820,7 @@ class VideoAnalyzer:
             "fake_frames": fake_frames,
             "real_frames": len(frame_results) - fake_frames,
             "faces_detected_in_frames": faces_detected,
+            "video_lstm_risk": round(lstm_risk, 4) if lstm_risk is not None else None,
             "video_info": info,
             "frame_results": frame_results,
             "temporal_summary": {

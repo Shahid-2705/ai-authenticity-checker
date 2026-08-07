@@ -87,7 +87,7 @@ def main():
         status = "OK" if success else "FAILED"
         print(f"  {name:40s} [{status}]")
 
-    print(f"\nModel files:")
+    print("\nModel files:")
     for f in sorted(glob.glob(os.path.join(ROOT_DIR, "models", "*.pth"))):
         size_mb = os.path.getsize(f) / 1024 / 1024
         print(f"  {os.path.basename(f):40s} {size_mb:.1f} MB")

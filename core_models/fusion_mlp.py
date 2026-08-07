@@ -4,7 +4,7 @@ Learned Fusion MLP — replaces manual weighted averaging.
 Takes calibrated per-model scores and learns optimal combination weights.
 Includes per-model temperature calibration as learnable parameters.
 
-Input:  [vit, efficientnet, forensic, frequency, face, dino, texture]
+Input:  [vit, texture, forensic, frequency, dino, efficientnet_auth, face]
 Output: P(AI-generated) after sigmoid
 
 Saves as: models/fusion_mlp.pth
@@ -48,16 +48,24 @@ class FusionMLP(nn.Module):
     Learned fusion network with integrated calibration.
 
     Architecture:
-        calibrate -> Linear(7, 16) -> ReLU -> Dropout(0.2)
-                  -> Linear(16, 8)  -> ReLU -> Dropout(0.1)
-                  -> Linear(8, 1)   -> Sigmoid
+        calibrate -> Linear(n_inputs, 8) -> ReLU -> Linear(8, 1) -> Sigmoid
 
-    Input order: [vit, efficientnet, forensic, frequency, face, dino, texture]
+    Input order: MODEL_NAMES (see below).
+
+    NOTE: upstream/main independently redesigned this as a deeper 3-layer
+    network (Linear(7,16)->Linear(16,8)->Linear(8,1)) with a different
+    input order/naming (efficientnet vs efficientnet_auth). Kept the
+    smaller architecture here deliberately: the currently-deployed
+    models/fusion_mlp.pth was trained against this exact shape and input
+    order today (see training/train_fusion.py history) - swapping
+    architectures would silently invalidate it, not just require a reload.
+    The deeper design may be worth adopting later, but that requires a
+    full fusion retrain first, not a merge-time swap.
     """
 
     MODEL_NAMES = [
-        "vit", "efficientnet", "forensic", "frequency",
-        "face", "dino", "texture",
+        "vit", "texture", "forensic", "frequency",
+        "dino", "efficientnet_auth", "face",
     ]
 
     def __init__(self, n_inputs=7):
@@ -66,12 +74,9 @@ class FusionMLP(nn.Module):
         self.calibrator = ModelCalibrator(n_models=n_inputs)
 
         self.fusion = nn.Sequential(
-            nn.Linear(n_inputs, 16),
+            nn.Linear(n_inputs, 8),
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(16, 8),
-            nn.ReLU(),
-            nn.Dropout(0.1),
             nn.Linear(8, 1),
             nn.Sigmoid(),
         )
@@ -79,7 +84,8 @@ class FusionMLP(nn.Module):
     def forward(self, scores):
         """
         Args:
-            scores: (batch, 7) tensor of model scores, each in [0, 1].
+            scores: (batch, n_inputs) tensor matching MODEL_NAMES order.
+                    Each value in [0, 1].
 
         Returns:
             (batch, 1) fused P(AI-generated)
@@ -87,16 +93,8 @@ class FusionMLP(nn.Module):
         calibrated = self.calibrator(scores)
         return self.fusion(calibrated)
 
-    def predict(
-        self,
-        vit=0.0,
-        efficientnet=0.0,
-        forensic=0.0,
-        frequency=0.0,
-        face=0.0,
-        dino=0.0,
-        texture=0.0,
-    ):
+    def predict(self, vit=0.0, texture=0.0, forensic=0.0, frequency=0.0,
+                dino=0.0, efficientnet_auth=0.0, face=0.0):
         """
         Convenience method for single-sample inference.
 
@@ -104,7 +102,7 @@ class FusionMLP(nn.Module):
             float: fused risk score in [0, 1]
         """
         scores = torch.tensor(
-            [[vit, efficientnet, forensic, frequency, face, dino, texture]],
+            [[vit, texture, forensic, frequency, dino, efficientnet_auth, face]],
             dtype=torch.float32,
         )
         with torch.no_grad():

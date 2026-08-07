@@ -15,21 +15,15 @@ from typing import Any, Optional
 
 
 class Verdict(str, Enum):
-    """4-tier verdict system replacing HIGH/MEDIUM/LOW RISK."""
-    LIKELY_MANIPULATED = "LIKELY MANIPULATED"
-    POSSIBLY_MANIPULATED = "POSSIBLY MANIPULATED"
-    UNCERTAIN = "UNCERTAIN"
-    LIKELY_AUTHENTIC = "LIKELY AUTHENTIC"
+    """2-tier verdict system: single cutoff at 60% risk."""
+    AI_GENERATED = "AI-GENERATED"
+    AUTHENTIC = "AUTHENTIC"
 
     @classmethod
     def from_risk_score(cls, risk: float) -> "Verdict":
-        if risk > 0.70:
-            return cls.LIKELY_MANIPULATED
-        if risk > 0.45:
-            return cls.POSSIBLY_MANIPULATED
-        if risk > 0.30:
-            return cls.UNCERTAIN
-        return cls.LIKELY_AUTHENTIC
+        if risk >= 0.60:
+            return cls.AI_GENERATED
+        return cls.AUTHENTIC
 
 
 class Confidence(str, Enum):

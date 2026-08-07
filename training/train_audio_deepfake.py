@@ -1,10 +1,12 @@
 """
 Training script for the Audio Deepfake CNN model.
 
-Trains on the ASVspoof 2019 LA dataset (same as zo9999) via HuggingFace,
-or falls back to a smaller public dataset if unavailable.
+Combines samples from multiple HuggingFace real/fake speech datasets
+(see HF_DATASETS) so the model learns real-vs-fake characteristics that
+hold across recording conditions, rather than shortcut-learning a single
+source's acoustic fingerprint.
 
-Architecture: 2-layer CNN on mel-spectrograms (matches zo9999 exactly).
+Architecture: 2-layer CNN on mel-spectrograms with BatchNorm.
 
 Usage:
     python training/train_audio_deepfake.py
@@ -34,7 +36,7 @@ from core_models.audio_deepfake_model import AudioDeepfakeCNN
 # ================= CONFIG =================
 BATCH_SIZE = 32
 EPOCHS = 20
-LR = 1e-3
+LR = 3e-4
 TRAIN_SPLIT = 0.85
 MAX_SAMPLES = 50000         # 6x increase for robust audio detection
 MODEL_PATH = "models/audio_deepfake_model.pth"
@@ -49,11 +51,20 @@ N_FFT = 2048
 HOP_LENGTH = 512
 MAX_DURATION = 5.0          # seconds (matches zo9999 training)
 
-# Dataset config — try multiple sources (loader tries each, skips failures)
+# Dataset config — samples are COMBINED from all sources below, not just
+# tried as a fallback chain. A held-out cross-dataset check found a model
+# trained on Hemg/Deepfakeaudio alone reached 100% on its own validation
+# split but only 52.7% (near-random, always guessing "real") when tested
+# against garystafford/deepfake-audio-detection - it had learned Hemg's
+# specific recording/compression fingerprint instead of genuine real-vs-
+# fake characteristics. Combining diverse sources forces the model to
+# learn features that hold across recording conditions.
+# moibrahimovic/fake_or_real no longer exists on the Hub.
+# ud-nlp/real-vs-fake-human-voice-deepfake-audio only has 70 total samples -
+# too small to meaningfully contribute, excluded.
 HF_DATASETS = [
-    "moibrahimovic/fake_or_real",
-    "ud-nlp/real-vs-fake-human-voice-deepfake-audio",
-    "garystafford/deepfake-audio-detection",
+    "Hemg/Deepfakeaudio",                     # 19,817 examples
+    "garystafford/deepfake-audio-detection",  # 1,866 examples
 ]
 # ==========================================
 
@@ -65,12 +76,15 @@ def audio_to_mel(waveform, sr=SAMPLE_RATE):
     )
     mel_db = librosa.power_to_db(mel, ref=np.max)
 
-    # Pad or truncate to fixed width
+    # Pad or truncate to fixed width. Pad with -80 dB (silence floor, since
+    # power_to_db(ref=np.max) puts the loudest frame at 0 dB) rather than
+    # the implicit 0 fill, which would represent peak loudness instead.
     if mel_db.shape[1] < MAX_TIME_STEPS:
         mel_db = np.pad(
             mel_db,
             ((0, 0), (0, MAX_TIME_STEPS - mel_db.shape[1])),
             mode="constant",
+            constant_values=-80.0,
         )
     else:
         mel_db = mel_db[:, :MAX_TIME_STEPS]
@@ -138,32 +152,45 @@ class AudioMelDataset(Dataset):
             if random.random() < 0.3:
                 gain = random.uniform(0.8, 1.2)
                 mel = mel * gain
-        mel = torch.tensor(mel, dtype=torch.float32).unsqueeze(0)
+        # Normalize dB range [-80, 0] to [0, 1]. The model has no BatchNorm
+        # layers; raw dB-scale input (magnitude ~40-80) caused dead ReLUs
+        # and prevented any learning. Must match pipeline/audio_analyzer.py's
+        # normalization used at inference time.
+        mel_norm = (mel + 80.0) / 80.0
+        mel = torch.tensor(mel_norm, dtype=torch.float32).unsqueeze(0)
         label = torch.tensor(self.labels[idx], dtype=torch.long)
         return mel, label
 
 
-def _parse_label(sample):
-    """Parse label from a HuggingFace dataset sample. Returns 0=fake, 1=real, or -1 if unknown."""
+def _parse_label(sample, label_feature=None):
+    """Parse label from a HuggingFace dataset sample. Returns 0=fake, 1=real, or -1 if unknown.
+
+    label_feature: the dataset's `features["label"]` object, if present. When
+    it's a ClassLabel, its int-to-name mapping is used to resolve integer
+    labels correctly instead of guessing a numeric convention (datasets are
+    not consistent about whether 0 or 1 means "fake").
+    """
     # ASVspoof style: 'key' column
     if "key" in sample:
         raw = sample["key"]
         return 1 if raw == "bonafide" else 0
 
-    # fake_or_real style: 'label' as string or int
     if "label" in sample:
         raw = sample["label"]
         if isinstance(raw, str):
             low = raw.lower().strip()
-            if low in ("bonafide", "real", "genuine", "original", "authentic"):
-                return 1
-            elif low in ("spoof", "fake", "deepfake", "synthetic", "generated"):
-                return 0
-            return -1
+        elif label_feature is not None and hasattr(label_feature, "int2str"):
+            low = label_feature.int2str(int(raw)).lower().strip()
         else:
-            # int label: 0 = real/original, nonzero = fake (common convention)
-            # But check if it's binary (0/1) where 1=fake
+            # No ClassLabel schema to resolve against - fall back to a
+            # common convention (0=real, nonzero=fake). This is a guess.
             return 0 if int(raw) > 0 else 1
+
+        if low in ("bonafide", "real", "genuine", "original", "authentic"):
+            return 1
+        elif low in ("spoof", "fake", "deepfake", "synthetic", "generated"):
+            return 0
+        return -1
 
     if "is_fake" in sample:
         return 0 if sample["is_fake"] else 1
@@ -171,87 +198,130 @@ def _parse_label(sample):
     return -1
 
 
-def load_dataset_hf():
-    """Load audio samples from HuggingFace datasets (tries multiple sources)."""
+def _collect_from_source(ds_name, per_class_target, scan_limit):
+    """Reservoir-sample up to per_class_target fake/real mel-spectrograms
+    from a single HF dataset, scanning up to scan_limit total samples.
+
+    Uses Algorithm R per class so the final samples are a uniform random
+    draw across the whole scan range, not just whatever appeared first
+    (this stream isn't shuffled by the source, and per-class quota
+    collection that stops the instant it's met only ever samples a
+    narrow early slice - see the same fix in train_dinov2.py et al).
+
+    Returns: (reservoirs dict {0: [...], 1: [...]}, total_seen, errors)
+    """
     from datasets import load_dataset, Audio
 
-    # Force soundfile backend (avoids torchcodec/FFmpeg issues on Windows)
-    import datasets.config
-    datasets.config.AUDIO_DECODER_BACKEND = "soundfile"
+    print(f"\nAttempting to load: {ds_name}")
+    try:
+        ds = load_dataset(ds_name, split="train", streaming=True)
+        ds = ds.cast_column("audio", Audio(sampling_rate=SAMPLE_RATE, decode=True))
+        sample = next(iter(ds))
+        print(f"  Columns: {list(sample.keys())}")
+        # Re-create the iterator since we consumed one testing it
+        ds = load_dataset(ds_name, split="train", streaming=True)
+        ds = ds.cast_column("audio", Audio(sampling_rate=SAMPLE_RATE, decode=True))
+        print(f"  Successfully connected to {ds_name}")
+    except Exception as e:
+        print(f"  Failed: {e}")
+        return {0: [], 1: []}, 0, 0
 
-    ds = None
-    for ds_name in HF_DATASETS:
-        print(f"Attempting to load: {ds_name}")
-        try:
-            ds = load_dataset(ds_name, split="train", streaming=True)
-            ds = ds.cast_column("audio", Audio(sampling_rate=SAMPLE_RATE, decode=True))
-            # Test that we can actually read a sample
-            sample = next(iter(ds))
-            print(f"  Columns: {list(sample.keys())}")
-            # Re-create the iterator since we consumed one
-            ds = load_dataset(ds_name, split="train", streaming=True)
-            ds = ds.cast_column("audio", Audio(sampling_rate=SAMPLE_RATE, decode=True))
-            print(f"  Successfully connected to {ds_name}")
-            break
-        except Exception as e:
-            print(f"  Failed: {e}")
-            ds = None
+    label_feature = ds.features.get("label")
+    ds = ds.shuffle(seed=42, buffer_size=2000)
 
-    if ds is None:
-        print("\nAll HuggingFace datasets failed.")
-        print("Please provide audio data manually in data/audio/real/ and data/audio/fake/")
-        return None, None
-
-    per_class = MAX_SAMPLES // 2
-    mels = []
-    labels = []
-    class_counts = {0: 0, 1: 0}  # 0=fake, 1=real
+    reservoirs = {0: [], 1: []}  # 0=fake, 1=real
+    seen_counts = {0: 0, 1: 0}
     total_seen = 0
     errors = 0
+    last_printed = 0
 
-    print(f"Collecting {per_class} samples per class ({MAX_SAMPLES} total)...")
+    print(f"  Reservoir-sampling {per_class_target} per class from up to "
+          f"{scan_limit} streamed samples...")
 
     for sample in ds:
         total_seen += 1
 
-        label = _parse_label(sample)
+        label = _parse_label(sample, label_feature)
         if label == -1:
             continue
 
-        if class_counts[label] >= per_class:
-            if all(c >= per_class for c in class_counts.values()):
-                break
-            continue
+        seen_counts[label] += 1
+        use_slot = len(reservoirs[label]) < per_class_target
+        replace_idx = None
+        if not use_slot:
+            j = random.randint(0, seen_counts[label] - 1)
+            if j < per_class_target:
+                use_slot = True
+                replace_idx = j
 
-        try:
-            audio_data = sample["audio"]
-            waveform = audio_data["array"]
-            sr = audio_data["sampling_rate"]
+        if use_slot:
+            try:
+                audio_data = sample["audio"]
+                waveform = audio_data["array"]
+                sr = audio_data["sampling_rate"]
 
-            if len(waveform) == 0:
+                if len(waveform) == 0:
+                    continue
+
+                max_samples = int(MAX_DURATION * sr)
+                waveform = waveform[:max_samples].astype(np.float32)
+                mel = audio_to_mel(waveform, sr)
+
+                if replace_idx is None:
+                    reservoirs[label].append((mel, label))
+                else:
+                    reservoirs[label][replace_idx] = (mel, label)
+
+            except Exception:
+                errors += 1
+                if errors > 50:
+                    print(f"    Too many errors ({errors}), stopping this source")
+                    break
                 continue
 
-            max_samples = int(MAX_DURATION * sr)
-            waveform = waveform[:max_samples].astype(np.float32)
+        if total_seen - last_printed >= 2000:
+            last_printed = total_seen
+            print(f"    scanned {total_seen}/{scan_limit} "
+                  f"(Fake: {len(reservoirs[0])}, Real: {len(reservoirs[1])})")
+        if total_seen >= scan_limit:
+            break
 
-            mel = audio_to_mel(waveform, sr)
-            mels.append(mel)
-            labels.append(label)
-            class_counts[label] += 1
+    print(f"  Collected from {ds_name}: Fake={len(reservoirs[0])}, "
+          f"Real={len(reservoirs[1])} (errors: {errors}) from {total_seen} streamed")
+    return reservoirs, total_seen, errors
 
-            collected = class_counts[0] + class_counts[1]
-            if collected % 200 == 0:
-                print(f"  collected {collected}/{MAX_SAMPLES} "
-                      f"(Fake: {class_counts[0]}, Real: {class_counts[1]}, scanned: {total_seen})")
 
-        except Exception:
-            errors += 1
-            if errors > 50:
-                print(f"  Too many errors ({errors}), stopping collection")
-                break
-            continue
+def load_dataset_hf():
+    """Load audio samples, COMBINING all sources in HF_DATASETS.
 
-    print(f"Collected {len(mels)} samples (Fake: {class_counts[0]}, Real: {class_counts[1]}, errors: {errors})")
+    A model trained on a single source reached 100% on its own validation
+    split but only 52.7% (near-random) on a different dataset - it learned
+    that source's recording/compression fingerprint instead of genuine
+    real-vs-fake characteristics. Combining diverse sources forces the
+    model to learn features that hold across recording conditions.
+    """
+    import datasets.config
+    datasets.config.AUDIO_DECODER_BACKEND = "soundfile"  # avoids torchcodec/FFmpeg issues on Windows
+
+    random.seed(42)
+
+    per_class = MAX_SAMPLES // 2
+    per_class_per_source = per_class // len(HF_DATASETS)
+    scan_limit_per_source = per_class_per_source * 10
+
+    all_mels = {0: [], 1: []}
+    for ds_name in HF_DATASETS:
+        reservoirs, _, _ = _collect_from_source(
+            ds_name, per_class_per_source, scan_limit_per_source
+        )
+        all_mels[0].extend(reservoirs[0])
+        all_mels[1].extend(reservoirs[1])
+
+    combined = all_mels[0] + all_mels[1]
+    mels = [m for m, _ in combined]
+    labels = [label_val for _, label_val in combined]
+    print(f"\nTotal combined from {len(HF_DATASETS)} sources: {len(mels)} samples "
+          f"(Fake: {len(all_mels[0])}, Real: {len(all_mels[1])})")
 
     if len(mels) < 20:
         return None, None
@@ -346,7 +416,7 @@ def main():
     scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-6)
 
     # Training loop
-    print(f"\nStarting Audio Deepfake CNN training...\n")
+    print("\nStarting Audio Deepfake CNN training...\n")
     best_val_loss = float("inf")
     patience_counter = 0
 
@@ -358,8 +428,14 @@ def main():
             mels_batch = mels_batch.to(device)
             labels_batch = labels_batch.to(device)
 
-            preds = model(mels_batch)
-            loss = criterion(preds, labels_batch)
+            # AudioDeepfakeCNN.forward() applies softmax internally (its
+            # public contract, relied on elsewhere e.g. AudioAnalyzer).
+            # CrossEntropyLoss also applies softmax internally, so feeding
+            # it model(x) double-softmaxes and collapses gradients to
+            # near-zero. Compose the submodules directly to get raw logits
+            # for the loss instead.
+            logits = model.classifier(model.features(mels_batch))
+            loss = criterion(logits, labels_batch)
 
             optimizer.zero_grad()
             loss.backward()
@@ -380,11 +456,11 @@ def main():
                 mels_batch = mels_batch.to(device)
                 labels_batch = labels_batch.to(device)
 
-                preds = model(mels_batch)
-                loss = criterion(preds, labels_batch)
+                logits = model.classifier(model.features(mels_batch))
+                loss = criterion(logits, labels_batch)
                 val_loss += loss.item()
 
-                pred_labels = preds.argmax(dim=1)
+                pred_labels = logits.argmax(dim=1)
                 correct += (pred_labels == labels_batch).sum().item()
                 total += labels_batch.size(0)
 
@@ -413,7 +489,7 @@ def main():
                 print(f"\nEarly stopping at epoch {epoch+1}")
                 break
 
-    print(f"\nAudio Deepfake CNN training complete.")
+    print("\nAudio Deepfake CNN training complete.")
     print(f"Best model saved to: {MODEL_PATH}")
 
 

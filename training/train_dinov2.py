@@ -14,10 +14,11 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from torchvision import transforms
 
 from core_models.dinov2_auth_model import DINOv2AuthModel
-from training.dataset_portraits import load_portrait_dataset, PortraitDataset
+from training.dataset_portraits import (
+    load_portrait_dataset, PortraitDataset, TRAIN_TRANSFORM, VAL_TRANSFORM,
+)
 
 # ================= CONFIG =================
 BATCH_SIZE = 16
@@ -36,50 +37,46 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
 
-    # -------- Transforms --------
-    train_transform = transforms.Compose([
-        transforms.Resize((256, 256)),
-        transforms.RandomResizedCrop(224, scale=(0.7, 1.0)),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(15),
-        transforms.RandomApply([transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))], p=0.3),
-        transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.05),
-        transforms.RandomGrayscale(p=0.05),
-        transforms.ToTensor(),
-        transforms.RandomErasing(p=0.1, scale=(0.02, 0.1)),
-        transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225]
-        )
-    ])
-
-    val_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225]
-        )
-    ])
-
-    # -------- Load multi-source portrait dataset (8 HF sources) --------
+    # -------- Load dataset via the shared multi-source loader --------
+    # Now pulls from PORTRAIT_SOURCES (StyleGAN/GAN portraits, many HF-
+    # streaming sources with reservoir sampling) PLUS OpenRL/DeepFakeFace
+    # (diffusion-generated: SD Inpainting/text2img, InsightFace) —
+    # previously this trained on the single
+    # Hemg/AI-Generated-vs-Real-Images-Datasets source only, which is
+    # GAN-style and taught DINOv2 nothing about diffusion output
+    # (training/eval_image_benchmark.py found the whole ensemble at 30.8%
+    # accuracy on diffusion fakes vs 83.3% on real photos).
+    # face_align=False: tried True on the theory that InsightFace fakes
+    # (face-swaps onto the same real IMDB-WIKI photos as the real baseline -
+    # see training/diagnose_insight.py) would be easier to catch with a
+    # tight face crop isolating the manipulated region. Measured result was
+    # the opposite: InsightFace accuracy dropped 6.7%->3.3% and inpainting
+    # dropped too (training/eval_image_benchmark.py, round 4 vs round 3) -
+    # a tight crop likely excludes the blend boundary itself, which sits at
+    # the hairline/jaw/neck edge just outside it, and losing the
+    # complementary whole-image signal across 3 of 7 fusion inputs hurt
+    # more than the crop helped. Reverted.
     print(f"Loading multi-source portrait dataset ({MAX_SAMPLES} samples)...")
     train_samples, val_samples = load_portrait_dataset(
-        max_samples=MAX_SAMPLES,
-        train_split=TRAIN_SPLIT,
-        face_align=True,
+        max_samples=MAX_SAMPLES, train_split=TRAIN_SPLIT, face_align=False,
     )
 
     print(f"Train samples: {len(train_samples)}")
     print(f"Val samples  : {len(val_samples)}")
 
     train_loader = DataLoader(
-        PortraitDataset(train_samples, train_transform),
-        batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=True,
+        PortraitDataset(train_samples, transform=TRAIN_TRANSFORM),
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=0,
+        pin_memory=True
     )
     val_loader = DataLoader(
-        PortraitDataset(val_samples, val_transform),
-        batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True,
+        PortraitDataset(val_samples, transform=VAL_TRANSFORM),
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=True
     )
 
     # -------- Model --------

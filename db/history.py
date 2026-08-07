@@ -22,6 +22,13 @@ from db.models import Analysis
 logger = logging.getLogger(__name__)
 
 
+def _json_default(obj: Any) -> Any:
+    """Coerce numpy scalars (e.g. float32 model outputs) to native Python types."""
+    if hasattr(obj, "item"):
+        return obj.item()
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
+
 class AnalysisHistory:
     """Async SQLAlchemy-backed analysis history."""
 
@@ -37,7 +44,7 @@ class AnalysisHistory:
             verdict=result.get("verdict", ""),
             confidence=result.get("confidence", ""),
             risk_level=result.get("risk_level", ""),
-            model_scores=json.dumps(result.get("model_scores", {})),
+            model_scores=json.dumps(result.get("model_scores", {}), default=_json_default),
             model_agreement=result.get("model_agreement", ""),
             fusion_mode=result.get("fusion_mode", ""),
             models_used=result.get("models_used", 0),
@@ -46,7 +53,7 @@ class AnalysisHistory:
             processing_time_ms=result.get("processing_time_ms", 0.0),
             file_name=result.get("file_name", ""),
             file_size_bytes=result.get("file_size_bytes"),
-            metadata_json=json.dumps(result.get("metadata", {})),
+            metadata_json=json.dumps(result.get("metadata", {}), default=_json_default),
             explanation=result.get("explanation", ""),
             user_id=user_id,
         )

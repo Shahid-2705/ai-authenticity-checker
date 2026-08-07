@@ -1,7 +1,5 @@
 import sys
 import os
-import random
-import time
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
@@ -63,12 +61,29 @@ def main():
         )
     ])
 
-    # -------- Load multi-source portrait dataset (8 HF sources) --------
+    # -------- Load dataset via the shared multi-source loader --------
+    # Now pulls from PORTRAIT_SOURCES (many GAN/diffusion HF-streaming
+    # sources, reservoir-sampled) PLUS OpenRL/DeepFakeFace (diffusion-
+    # generated: SD Inpainting/text2img, InsightFace) instead of the single
+    # Hemg/AI-Generated-vs-Real-Images-Datasets source used before - that
+    # source alone taught this model nothing about diffusion output.
+    # training/eval_image_benchmark.py found the whole ensemble at 30.8%
+    # accuracy on diffusion fakes vs 83-97% on real photos, and this
+    # model's own average score on that held-out set was just 0.153,
+    # meaning it was still confidently calling diffusion fakes "real."
+    # face_align=False: tried True on the theory that InsightFace fakes
+    # (face-swaps onto the same real IMDB-WIKI photos as the real baseline -
+    # see training/diagnose_insight.py) would be easier to catch with a
+    # tight face crop isolating the manipulated region. Measured result was
+    # the opposite: InsightFace accuracy dropped 6.7%->3.3% and inpainting
+    # dropped too (training/eval_image_benchmark.py, round 4 vs round 3) -
+    # a tight crop likely excludes the blend boundary itself, which sits at
+    # the hairline/jaw/neck edge just outside it, and losing the
+    # complementary whole-image signal across 3 of 7 fusion inputs hurt
+    # more than the crop helped. Reverted.
     print(f"Loading multi-source portrait dataset ({MAX_SAMPLES} samples)...")
     train_data, val_data = load_portrait_dataset(
-        max_samples=MAX_SAMPLES,
-        train_split=TRAIN_SPLIT,
-        face_align=True,
+        max_samples=MAX_SAMPLES, train_split=TRAIN_SPLIT, face_align=False,
     )
 
     print(f"Train samples: {len(train_data)}")

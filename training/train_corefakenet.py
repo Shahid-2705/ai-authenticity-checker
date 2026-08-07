@@ -31,7 +31,6 @@ os.environ["HF_HOME"] = os.path.join(ROOT_DIR, ".hf_cache")
 os.environ["HF_DATASETS_CACHE"] = os.path.join(ROOT_DIR, ".hf_cache", "datasets")
 
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torchvision import transforms
@@ -158,8 +157,8 @@ def validate(model, loader, device):
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
-    print(f"CorefakeNet Training")
-    print(f"=" * 60)
+    print("CorefakeNet Training")
+    print("=" * 60)
 
     # ---- Dataset ----
     print(f"\nLoading portrait dataset ({MAX_SAMPLES} samples)...")
@@ -275,7 +274,7 @@ def main():
 
     # ---- Summary ----
     print(f"\n{'=' * 60}")
-    print(f"Training complete.")
+    print("Training complete.")
     print(f"Best validation accuracy: {best_val_acc:.4f}")
     print(f"Best validation loss:     {best_val_loss:.4f}")
     print(f"Model saved to: {MODEL_PATH}")

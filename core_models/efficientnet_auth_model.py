@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 from torchvision.models import efficientnet_v2_s, EfficientNet_V2_S_Weights
 
