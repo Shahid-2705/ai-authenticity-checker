@@ -204,6 +204,7 @@ class ModelStatus(BaseModel):
     missing: list[str] = Field(default_factory=list)
     total: int = 0
     corefakenet_ready: bool = False
+    device: str = "cpu"
 
 
 class HealthResponse(BaseModel):

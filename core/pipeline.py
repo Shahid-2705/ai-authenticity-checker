@@ -291,6 +291,7 @@ class ModelRegistry:
             "missing": list(self.missing),
             "total": len(self.loaded),
             "corefakenet_ready": "corefakenet" in self.models,
+            "device": str(self.device),
         }
 
 

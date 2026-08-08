@@ -197,7 +197,7 @@ const useForensicStore = create((set) => ({
             (m) => m.toLowerCase().includes('fusion') || m.toLowerCase().includes('mlp'),
           ),
           vit_available: loaded.some((m) => m.toLowerCase().includes('vit')),
-          device: 'auto',
+          device: data.device || 'cpu',
           total: data.total || 0,
         },
         isStatusLoading: false,
