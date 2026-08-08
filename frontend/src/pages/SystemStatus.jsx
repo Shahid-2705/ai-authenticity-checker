@@ -46,7 +46,7 @@ export default function SystemStatus() {
               systemStatus.loaded_models.map((model) => (
                 <div
                   key={model}
-                  className="flex justify-between items-center p-2.5 rounded-lg bg-risk-clearDim border border-[rgba(52,211,153,0.15)]"
+                  className="flex justify-between items-center p-2.5 rounded-lg bg-risk-clearDim border border-[rgba(34,197,94,0.15)]"
                 >
                   <span className="text-sm font-medium text-text-1">{model}</span>
                   <CheckCircle size={16} className="text-risk-clear" />
@@ -100,7 +100,7 @@ export default function SystemStatus() {
               <span
                 className={`inline-block px-3 py-1 rounded text-xs font-bold border ${
                   ok
-                    ? 'bg-risk-clearDim text-risk-clear border-[rgba(52,211,153,0.25)]'
+                    ? 'bg-risk-clearDim text-risk-clear border-[rgba(34,197,94,0.25)]'
                     : 'bg-risk-criticalDim text-risk-critical border-[rgba(251,113,133,0.25)]'
                 }`}
               >

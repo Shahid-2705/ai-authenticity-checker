@@ -6,6 +6,7 @@ Responses follow the envelope pattern: {success, data, error}.
 """
 
 import asyncio
+import base64
 import io
 import logging
 import os
@@ -76,8 +77,17 @@ MAGIC_BYTES: dict[str, list[bytes]] = {
     ".tiff": [b"II\x2a\x00", b"MM\x00\x2a"],
 }
 
-# Fields to strip from results before returning to clients
-_STRIP_FIELDS = {"gradcam_image", "original_image"}
+# Fields to strip from results before returning to clients — gradcam_image
+# is handled separately (serialized to base64) rather than stripped, since
+# the frontend heatmap viewer needs it.
+_STRIP_FIELDS = {"original_image"}
+
+
+def _pil_to_base64(img: Image.Image) -> str:
+    """Bare base64 PNG payload (no data-URI prefix — the frontend adds it)."""
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
 def _validate_magic_bytes(contents: bytes, ext: str) -> None:
@@ -181,6 +191,14 @@ async def _save_and_build_response(
         and k not in ("id", "timestamp")
         and k not in _STRIP_FIELDS
     }
+
+    # GradCAM is a PIL Image in the raw pipeline result — the generic pass
+    # above would pass it through unconverted (and fail Pydantic validation,
+    # which expects a str). Overwrite with a base64-serialized version when
+    # the response model declares the field (currently only ImageAnalysisResult).
+    gradcam = pipeline_result.get("gradcam_image")
+    if isinstance(gradcam, Image.Image) and "gradcam_image" in result_model.model_fields:
+        response_fields["gradcam_image"] = _pil_to_base64(gradcam)
 
     return analysis_id, timestamp, response_fields
 
