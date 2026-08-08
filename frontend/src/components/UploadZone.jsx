@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react';
-import { UploadCloud, Check, AlertCircle, FolderOpen, X } from 'lucide-react';
+import { UploadCloud, Check, RefreshCw, AlertCircle, FolderOpen, X } from 'lucide-react';
 import { isFileAccepted } from '../utils/format';
 
 const FORMAT_LABELS = {
@@ -143,6 +143,12 @@ export default function UploadZone({
           aria-label={label}
         />
 
+        {/* HUD corner brackets — viewfinder accent, reinforces "scanning" affordance */}
+        <span className={`hud-corner z-20 top-2.5 left-2.5 border-t-2 border-l-2 rounded-tl-md ${isDragActive ? 'border-accent' : ''}`} aria-hidden="true" />
+        <span className={`hud-corner z-20 top-2.5 right-2.5 border-t-2 border-r-2 rounded-tr-md ${isDragActive ? 'border-accent' : ''}`} aria-hidden="true" />
+        <span className={`hud-corner z-20 bottom-2.5 left-2.5 border-b-2 border-l-2 rounded-bl-md ${isDragActive ? 'border-accent' : ''}`} aria-hidden="true" />
+        <span className={`hud-corner z-20 bottom-2.5 right-2.5 border-b-2 border-r-2 rounded-br-md ${isDragActive ? 'border-accent' : ''}`} aria-hidden="true" />
+
         {rejected || sizeError ? (
           <div className="flex flex-col items-center justify-center z-20 text-center px-6 py-6">
             <AlertCircle size={28} className="mb-2 text-risk-critical" />
@@ -155,6 +161,26 @@ export default function UploadZone({
                 : `Please select a ${accept.replace('/*', '')} file`}
             </p>
           </div>
+        ) : preview && preview.url && preview.type?.startsWith('image/') ? (
+          <>
+            <img
+              src={preview.url}
+              alt={preview.name}
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/5 to-black/10" />
+            <div className="relative z-20 w-full flex flex-col items-center justify-end h-full text-center px-4 py-3">
+              <div className="flex items-center gap-2 bg-black/50 backdrop-blur-sm px-3 py-1.5 rounded-lg max-w-full">
+                <Check size={14} className="text-risk-clear flex-shrink-0" />
+                <span className="text-sm font-medium truncate max-w-[200px] text-white">
+                  {preview.name || 'File loaded'}
+                </span>
+              </div>
+              <p className="text-xs mt-2 flex items-center gap-1 text-white/80">
+                <RefreshCw size={10} /> Drop new file to replace
+              </p>
+            </div>
+          </>
         ) : preview ? (
           <div className="flex flex-col items-center justify-center z-20 text-center px-6 py-6">
             <div className="flex items-center gap-2">

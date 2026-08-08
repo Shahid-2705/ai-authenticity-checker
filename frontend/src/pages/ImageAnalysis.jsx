@@ -10,6 +10,7 @@ import RiskGauge from '../components/RiskGauge';
 import ScoreBar from '../components/ScoreBar';
 import VerdictCard from '../components/VerdictCard';
 import HeatmapViewer from '../components/HeatmapViewer';
+import IndeterminateProgress from '../components/IndeterminateProgress';
 
 const MODES = [
   {
@@ -133,15 +134,18 @@ export default function ImageAnalysis() {
 
           {/* Analyze / Cancel buttons */}
           {isAnalyzing ? (
-            <div className="flex gap-2">
-              <button disabled className="btn-primary flex-1 py-3 text-sm">
-                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Analyzing...
-              </button>
-              <button onClick={handleCancelRequest} className="btn-danger py-3 px-4 text-sm">
-                <X size={15} />
-                Cancel
-              </button>
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <button disabled className="btn-primary flex-1 py-3 text-sm">
+                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Analyzing...
+                </button>
+                <button onClick={handleCancelRequest} className="btn-danger py-3 px-4 text-sm">
+                  <X size={15} />
+                  Cancel
+                </button>
+              </div>
+              <IndeterminateProgress label="Running forensic models…" />
             </div>
           ) : (
             <button

@@ -8,6 +8,8 @@ import UploadZone from '../components/UploadZone';
 import RiskGauge from '../components/RiskGauge';
 import VerdictCard from '../components/VerdictCard';
 import FrameTable from '../components/FrameTable';
+import VideoRiskTimeline from '../components/VideoRiskTimeline';
+import IndeterminateProgress from '../components/IndeterminateProgress';
 import useForensicStore from '../store/useForensicStore';
 
 const MODES = [
@@ -195,6 +197,9 @@ export default function VideoAnalysis() {
               </button>
             )}
           </div>
+          {isAnalyzing && (
+            <IndeterminateProgress label="Extracting & scoring frames…" />
+          )}
         </div>
 
         {/* Right panel */}
@@ -263,10 +268,14 @@ export default function VideoAnalysis() {
           </div>
 
           {results?.frame_details && (
-            <div className="card">
-              <p className="label-tag mb-3">Frame Timeline</p>
-              <FrameTable framesRawStr={results.frame_details} />
-            </div>
+            <>
+              <VideoRiskTimeline framesRawStr={results.frame_details} />
+
+              <div className="card">
+                <p className="label-tag mb-3">Frame Detail</p>
+                <FrameTable framesRawStr={results.frame_details} />
+              </div>
+            </>
           )}
 
           {results?.explanation && (
