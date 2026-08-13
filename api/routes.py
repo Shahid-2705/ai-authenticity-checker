@@ -141,8 +141,17 @@ async def _run_with_timeout(
     **kwargs: Any,
 ) -> Any:
     """Run a sync function in a thread pool with a timeout and GPU semaphore."""
+    # Wait up to the same budget as the analysis itself to *acquire* the
+    # semaphore, not a fixed 5s. With concurrency capped at 1 (see
+    # _MAX_CONCURRENT_INFERENCE) and video/multimodal routinely taking well
+    # over 5s - up to TIMEOUT_VIDEO=600s in ensemble mode - a second request
+    # arriving while the first is still legitimately running used to get
+    # rejected with "Server busy" after only 5s, even though the first
+    # request wasn't stuck. Queuing behind it for the same budget the
+    # analysis itself gets is the correct behavior; a genuinely wedged
+    # request still eventually times out via the acquire wait_for below.
     try:
-        await asyncio.wait_for(_inference_semaphore.acquire(), timeout=5.0)
+        await asyncio.wait_for(_inference_semaphore.acquire(), timeout=timeout)
     except asyncio.TimeoutError:
         raise HTTPException(
             status_code=503,
