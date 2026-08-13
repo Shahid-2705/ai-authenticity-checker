@@ -30,6 +30,23 @@ from core.types import (
 
 logger = logging.getLogger(__name__)
 
+
+def _to_native(obj):
+    """Recursively convert numpy/torch types to native Python types."""
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, torch.Tensor):
+        return obj.detach().cpu().tolist() if obj.dim() > 0 else obj.item()
+    if isinstance(obj, dict):
+        return {k: _to_native(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(_to_native(item) for item in obj)
+    return obj
+
 # Standard ImageNet transform (shared across models)
 TRANSFORM = transforms.Compose([
     transforms.Resize((224, 224)),
@@ -80,6 +97,8 @@ class ModelRegistry:
                        "core_models.dinov2_auth_model", "dinov2_auth_model.pth")
         self._try_load("efficientnet", "EfficientNetAuthModel",
                        "core_models.efficientnet_auth_model", "efficientnet_auth_model.pth")
+        self._try_load("video_lstm", "VideoTemporalLSTM",
+                       "core_models.video_lstm", "video_lstm.pth")
         self._try_load("face", "FaceDeepfakeModel",
                        "core_models.face_deepfake_model", "image_face_model.pth")
         self._try_load("texture", "EfficientNetTexture",
@@ -412,10 +431,13 @@ def analyze_image(image_pil: Image.Image, mode: str = "ensemble") -> dict[str, A
     start_time = time.perf_counter()
     reg = get_registry()
 
-    if mode == "fast":
-        return _analyze_image_fast(image_pil, reg, start_time)
-
-    return _analyze_image_ensemble(image_pil, reg, start_time)
+    try:
+        if mode == "fast":
+            return _analyze_image_fast(image_pil, reg, start_time)
+        return _analyze_image_ensemble(image_pil, reg, start_time)
+    except Exception as e:
+        logger.error("Image analysis failed: %s", e, exc_info=True)
+        return _empty_result("image", start_time, error=f"Image analysis failed: {e}")
 
 
 def _analyze_image_ensemble(
@@ -615,9 +637,9 @@ def _analyze_image_ensemble(
     # Ensure all scores are native Python floats (not numpy/torch float32)
     scores = {k: float(v) for k, v in scores.items()}
 
-    return {
+    return _to_native({
         "risk_score": float(final_risk),
-        "risk_percent": risk_pct,
+        "risk_percent": float(risk_pct),
         "verdict": verdict.value,
         "confidence": confidence.value,
         "risk_level": risk_level.value,
@@ -633,7 +655,7 @@ def _analyze_image_ensemble(
         "processing_time_ms": elapsed_ms,
         "explanation": explanation,
         "media_type": "image",
-    }
+    })
 
 
 def _analyze_image_fast(
@@ -652,7 +674,7 @@ def _analyze_image_fast(
 
     result = corefakenet.predict(model_input)
 
-    final_risk = result["final_risk"]
+    final_risk = float(result["final_risk"])
     risk_pct = final_risk * 100
     verdict = Verdict.from_risk_score(final_risk)
     confidence_enum = Confidence.from_risk_score(final_risk)
@@ -661,7 +683,7 @@ def _analyze_image_fast(
     scores = {}
     from core_models.corefakenet import CorefakeNet as CFN
     for name in CFN.HEAD_NAMES:
-        scores[name] = result["model_scores"][f"{name}_score"]
+        scores[name] = float(result["model_scores"][f"{name}_score"])
 
     # Explainability
     model_scores_for_explain = {
@@ -692,7 +714,7 @@ def _analyze_image_fast(
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-    return {
+    return _to_native({
         "risk_score": final_risk,
         "risk_percent": risk_pct,
         "verdict": verdict.value,
@@ -711,10 +733,10 @@ def _analyze_image_fast(
         "media_type": "image",
         "corefakenet_details": {
             "attention_weights": result.get("attention_weights", {}),
-            "temperature": result.get("temperature", 0.0),
-            "confidence_raw": result.get("confidence", 0.0),
+            "temperature": float(result.get("temperature", 0.0)),
+            "confidence_raw": float(result.get("confidence", 0.0)),
         },
-    }
+    })
 
 
 # ──────────────────────────────────────────────
@@ -800,6 +822,72 @@ def _analyze_video_fast(
     }
 
 
+def _format_frame_details(frame_results: list[dict]) -> str:
+    """Format frame results as a whitespace-delimited table for FrameTable UI."""
+    if not frame_results:
+        return ""
+
+    header = "Frame  Time     Risk     Pred   Face   ViT      Freq     Forns    FaceM    DINO     Eff"
+    separator = "-" * len(header)
+    lines = [header, separator]
+
+    for fr in frame_results:
+        cols = [
+            str(fr.get("frame_index", 0)),
+            f"{float(fr.get('timestamp', 0.0)):.2f}",
+            f"{float(fr.get('frame_risk', 0.0)):.4f}",
+            str(fr.get("prediction", "N/A")),
+            "Yes" if fr.get("has_face") else "No",
+            f"{float(fr.get('vit_prob', 0.0)):.4f}",
+            f"{float(fr.get('frequency_prob', 0.0)):.4f}",
+            f"{float(fr.get('forensic_prob', 0.0)):.4f}",
+            f"{float(fr.get('face_prob', 0.0)):.4f}",
+            f"{float(fr.get('dino_prob', 0.0)):.4f}",
+            f"{float(fr.get('eff_prob', 0.0)):.4f}",
+        ]
+        lines.append("  ".join(cols))
+
+    return "\n".join(lines)
+
+
+def _video_explanation(
+    risk_score: float,
+    total_frames: int,
+    fake_frames: int,
+    temporal: TemporalAnalysis,
+) -> str:
+    """Generate human-readable explanation for video analysis results."""
+    pct = risk_score * 100
+    parts: list[str] = []
+
+    if pct > 70:
+        parts.append(f"High risk of manipulation detected ({pct:.1f}%).")
+    elif pct > 45:
+        parts.append(f"Moderate risk indicators found ({pct:.1f}%).")
+    elif pct > 30:
+        parts.append(f"Low-to-moderate risk indicators ({pct:.1f}%).")
+    else:
+        parts.append(f"Low risk of manipulation ({pct:.1f}%).")
+
+    parts.append(
+        f"Analyzed {total_frames} frames — "
+        f"{fake_frames} flagged as potentially manipulated."
+    )
+
+    if temporal.score_variance > 0.02:
+        parts.append(
+            "Temporal inconsistency detected across frames, "
+            "suggesting possible splicing or frame-level manipulation."
+        )
+    if temporal.significant_jumps > 0:
+        parts.append(
+            f"{temporal.significant_jumps} significant score jump(s) "
+            "detected between adjacent frames."
+        )
+
+    return " ".join(parts)
+
+
 def analyze_video(
     video_path: str,
     fps: float = 4.0,
@@ -833,43 +921,59 @@ def analyze_video(
         if progress_callback:
             progress_callback(current, total, message)
 
-    result = reg.video_analyzer.analyze(
-        video_path=video_path,
-        fps=fps,
-        aggregation=aggregation,
-        progress_callback=_progress,
-    )
+    try:
+        result = reg.video_analyzer.analyze(
+            video_path=video_path,
+            fps=fps,
+            aggregation=aggregation,
+            progress_callback=_progress,
+        )
+    except Exception as e:
+        logger.error("Video analysis failed: %s", e, exc_info=True)
+        return _empty_result("video", start_time, error=f"Video analysis failed: {e}")
 
     if "error" in result:
         return _empty_result("video", start_time, error=result["error"])
 
-    risk_score = result["avg_risk"]
+    risk_score = float(result["avg_risk"])
     risk_pct = risk_score * 100
     verdict = Verdict.from_risk_score(risk_score)
     confidence_enum = Confidence.from_risk_score(risk_score)
 
     temporal = result.get("temporal_summary", {})
     temporal_analysis = TemporalAnalysis(
-        score_variance=temporal.get("overall_variance", 0.0),
-        max_frame_jump=temporal.get("max_frame_jump", 0.0),
-        significant_jumps=temporal.get("total_significant_jumps", 0),
-        risk_timeline=[fr["frame_risk"] for fr in result.get("frame_results", [])],
+        score_variance=float(temporal.get("overall_variance", 0.0)),
+        max_frame_jump=float(temporal.get("max_frame_jump", 0.0)),
+        significant_jumps=int(temporal.get("total_significant_jumps", 0)),
+        risk_timeline=[float(fr["frame_risk"]) for fr in result.get("frame_results", [])],
     )
+
+    frame_results = result.get("frame_results", [])
+    total_frames = int(result.get("total_frames_analyzed", 0))
+    fake_frames = int(result.get("fake_frames", 0))
+    real_frames = int(result.get("real_frames", 0))
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-    return {
+    explanation = _video_explanation(
+        risk_score, total_frames, fake_frames, temporal_analysis,
+    )
+    frame_details = _format_frame_details(frame_results)
+
+    # Convert all numpy/torch types to native Python before returning
+    return _to_native({
         "risk_score": risk_score,
         "risk_percent": risk_pct,
         "verdict": verdict.value,
         "confidence": confidence_enum.value,
         "risk_level": RiskLevel.from_risk_score(risk_score).value,
         "prediction": result.get("prediction", "UNKNOWN"),
-        "total_frames_analyzed": result.get("total_frames_analyzed", 0),
-        "fake_frames": result.get("fake_frames", 0),
-        "real_frames": result.get("real_frames", 0),
+        "total_frames_analyzed": total_frames,
+        "fake_frames": fake_frames,
+        "real_frames": real_frames,
         "faces_detected_in_frames": result.get("faces_detected_in_frames", 0),
-        "frame_results": result.get("frame_results", []),
+        "frame_results": frame_results,
+        "frame_details": frame_details,
         "temporal_analysis": {
             "score_variance": temporal_analysis.score_variance,
             "max_frame_jump": temporal_analysis.max_frame_jump,
@@ -879,8 +983,9 @@ def analyze_video(
         "video_info": result.get("video_info", {}),
         "aggregation_method": result.get("aggregation_method", aggregation),
         "processing_time_ms": elapsed_ms,
+        "explanation": explanation,
         "media_type": "video",
-    }
+    })
 
 
 # ──────────────────────────────────────────────
@@ -905,19 +1010,23 @@ def analyze_audio(
         if progress_callback:
             progress_callback(current, total, message)
 
-    result = reg.audio_analyzer.analyze(
-        audio_path=audio_path,
-        progress_callback=_progress,
-    )
+    try:
+        result = reg.audio_analyzer.analyze(
+            audio_path=audio_path,
+            progress_callback=_progress,
+        )
+    except Exception as e:
+        logger.error("Audio analysis failed: %s", e, exc_info=True)
+        return _empty_result("audio", start_time, error=f"Audio analysis failed: {e}")
 
     if "error" in result:
         return _empty_result("audio", start_time, error=result["error"])
 
-    fake_prob = result.get("fake_probability", 0.0)
-    auth_score = result.get("authenticity_score", 100.0)
+    fake_prob = float(result.get("fake_probability", 0.0))
+    auth_score = float(result.get("authenticity_score", 100.0))
     elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-    return {
+    return _to_native({
         "risk_score": fake_prob,
         "authenticity_score": auth_score,
         "verdict": Verdict.from_risk_score(fake_prob).value,
@@ -931,7 +1040,7 @@ def analyze_audio(
         "processing_time_ms": elapsed_ms,
         "media_type": "audio",
         "explanation": result.get("explanation", ""),
-    }
+    })
 
 
 # ──────────────────────────────────────────────
@@ -948,67 +1057,72 @@ def analyze_multimodal(
     Returns plain dict — see docs/ARCHITECTURE.md for schema.
     """
     start_time = time.perf_counter()
-    results: dict[str, dict] = {}
-    modality_scores: dict[str, Optional[float]] = {
-        "image": None, "video": None, "audio": None,
-    }
-
-    if image is not None:
-        img_result = analyze_image(image, mode="ensemble")
-        if "error" not in img_result:
-            results["image"] = img_result
-            modality_scores["image"] = img_result["risk_score"]
-
-    if video_path is not None:
-        vid_result = analyze_video(video_path)
-        if "error" not in vid_result:
-            results["video"] = vid_result
-            modality_scores["video"] = vid_result["risk_score"]
-
-    if audio_path is not None:
-        aud_result = analyze_audio(audio_path)
-        if "error" not in aud_result:
-            results["audio"] = aud_result
-            modality_scores["audio"] = aud_result["risk_score"]
-
-    active = {k: v for k, v in results.items()}
-    if not active:
-        return _empty_result("multimodal", start_time, error="No media provided")
-
-    # Weighted fusion
-    active_scores = {k: v["risk_score"] for k, v in active.items()}
-    fusion_weights = _compute_fusion_weights(set(active_scores.keys()))
-    final_score = sum(
-        fusion_weights[k] * active_scores[k] for k in active_scores
-    )
-
-    verdict = Verdict.from_risk_score(final_score)
-    confidence_enum = Confidence.from_risk_score(final_score)
 
     try:
-        from utils.explainability import explain_multimodal
-        explanation = explain_multimodal(
-            {k: round(v * 100, 1) if v is not None else None
-             for k, v in modality_scores.items()},
-            final_score,
-        )
-    except (RuntimeError, ValueError, TypeError):
-        explanation = ""
+        results: dict[str, dict] = {}
+        modality_scores: dict[str, Optional[float]] = {
+            "image": None, "video": None, "audio": None,
+        }
 
-    elapsed_ms = (time.perf_counter() - start_time) * 1000
+        if image is not None:
+            img_result = analyze_image(image, mode="ensemble")
+            if "error" not in img_result:
+                results["image"] = img_result
+                modality_scores["image"] = img_result["risk_score"]
 
-    return {
-        "risk_score": final_score,
-        "risk_percent": final_score * 100,
-        "verdict": verdict.value,
-        "confidence": confidence_enum.value,
-        "media_types": list(active.keys()),
-        "modality_scores": modality_scores,
-        "fusion_weights": fusion_weights,
-        "explanation": explanation,
-        "processing_time_ms": elapsed_ms,
-        "media_type": "multimodal",
-    }
+        if video_path is not None:
+            vid_result = analyze_video(video_path)
+            if "error" not in vid_result:
+                results["video"] = vid_result
+                modality_scores["video"] = vid_result["risk_score"]
+
+        if audio_path is not None:
+            aud_result = analyze_audio(audio_path)
+            if "error" not in aud_result:
+                results["audio"] = aud_result
+                modality_scores["audio"] = aud_result["risk_score"]
+
+        active = {k: v for k, v in results.items()}
+        if not active:
+            return _empty_result("multimodal", start_time, error="No media provided")
+
+        # Weighted fusion
+        active_scores = {k: float(v["risk_score"]) for k, v in active.items()}
+        fusion_weights = _compute_fusion_weights(set(active_scores.keys()))
+        final_score = float(sum(
+            fusion_weights[k] * active_scores[k] for k in active_scores
+        ))
+
+        verdict = Verdict.from_risk_score(final_score)
+        confidence_enum = Confidence.from_risk_score(final_score)
+
+        try:
+            from utils.explainability import explain_multimodal
+            explanation = explain_multimodal(
+                {k: round(v * 100, 1) if v is not None else None
+                 for k, v in modality_scores.items()},
+                final_score,
+            )
+        except (RuntimeError, ValueError, TypeError):
+            explanation = ""
+
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        return _to_native({
+            "risk_score": final_score,
+            "risk_percent": final_score * 100,
+            "verdict": verdict.value,
+            "confidence": confidence_enum.value,
+            "media_types": list(active.keys()),
+            "modality_scores": modality_scores,
+            "fusion_weights": fusion_weights,
+            "explanation": explanation,
+            "processing_time_ms": elapsed_ms,
+            "media_type": "multimodal",
+        })
+    except Exception as e:
+        logger.error("Multimodal analysis failed: %s", e, exc_info=True)
+        return _empty_result("multimodal", start_time, error=f"Multimodal analysis failed: {e}")
 
 
 def _compute_fusion_weights(modalities: set[str]) -> dict[str, float]:

@@ -29,13 +29,13 @@ class AudioDeepfakeCNN(nn.Module):
         super().__init__()
 
         self.features = nn.Sequential(
-            # Block 1: Conv(32) + MaxPool
+            # Block 1: Conv(32) + BatchNorm + ReLU + MaxPool
             nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=0),
             nn.BatchNorm2d(32),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
 
-            # Block 2: Conv(64) + MaxPool
+            # Block 2: Conv(64) + BatchNorm + ReLU + MaxPool
             nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=0),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),

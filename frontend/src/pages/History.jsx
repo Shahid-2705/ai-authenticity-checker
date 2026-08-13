@@ -223,7 +223,7 @@ export default function History() {
   };
 
   return (
-    <motion.div initial="hidden" animate="visible" variants={fadeUp} className="space-y-5">
+    <div className="space-y-5">
       <PageHeader
         icon={Clock}
         title="Analysis History"
@@ -421,6 +421,6 @@ export default function History() {
           </button>
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }

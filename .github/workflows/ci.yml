@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
   pull_request:
     branches: [main]
 
@@ -19,9 +21,52 @@ jobs:
       - name: Lint
         run: ruff check .
 
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install security tools
+        run: pip install bandit[toml] safety
+      - name: Run bandit security scan
+        run: bandit -r . -ll -f json -o bandit-report.json || true
+      - name: Display bandit results
+        run: bandit -r . -ll || true
+      - name: Check dependency vulnerabilities
+        run: safety check --json || true
+      - name: Upload bandit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-security-report
+          path: bandit-report.json
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint frontend
+        run: npm run lint
+      - name: Run frontend tests
+        run: npm run test -- --run
+      - name: Build frontend
+        run: npm run build
+
   test:
     runs-on: ubuntu-latest
-    needs: lint
+    needs: [lint, security]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,13 +75,100 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
-      - name: Run tests
-        run: pytest tests/ -v --tb=short -x
+      - name: Run tests with coverage
+        run: pytest tests/ -v --tb=short --cov=. --cov-report=xml --cov-report=term-missing
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
 
   docker:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, frontend]
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
     steps:
       - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: docker build -t proofyx:ci .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan Docker image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: staging
+      url: https://staging.proofyx.app
+    steps:
+      - name: Deploy to staging
+        run: |
+          echo "🚀 Deploying to staging environment"
+          echo "Image: ghcr.io/${{ github.repository }}:main-${{ github.sha }}"
+          # Add your deployment commands here:
+          # - SSH to staging server
+          # - Pull new image
+          # - Run docker-compose or kubectl apply
+          # Example:
+          # ssh deploy@staging.proofyx.app "cd /app && docker-compose pull && docker-compose up -d"
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: production
+      url: https://proofyx.app
+    steps:
+      - name: Deploy to production
+        run: |
+          echo "🚀 Deploying to production environment"
+          echo "Image: ghcr.io/${{ github.repository }}:${{ github.ref_name }}"
+          echo "⚠️  Production deployment requires manual approval"
+          # Add your deployment commands here:
+          # - SSH to production server
+          # - Pull tagged image
+          # - Run docker-compose or kubectl apply with zero-downtime strategy
+          # Example:
+          # ssh deploy@proofyx.app "cd /app && docker-compose pull && docker-compose up -d"

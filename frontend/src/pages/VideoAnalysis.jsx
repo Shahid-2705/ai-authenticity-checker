@@ -1,7 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
 import { Film, Play, Settings2, ShieldCheck, X, Zap } from 'lucide-react';
-import { fadeUp, fadeIn } from '../utils/animations';
 import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UploadZone from '../components/UploadZone';
@@ -76,7 +74,7 @@ export default function VideoAnalysis() {
   }, [clearAnalysis]);
 
   return (
-    <motion.div initial="hidden" animate="visible" variants={fadeUp} className="space-y-5">
+    <div className="space-y-5">
       <PageHeader
         icon={Film}
         title="Video Forensics"
@@ -233,7 +231,7 @@ export default function VideoAnalysis() {
                   {error}
                 </div>
               ) : results ? (
-                <motion.div variants={fadeIn} initial="hidden" animate="visible" className="flex flex-col items-center">
+                <div className="flex flex-col items-center">
                   <RiskGauge
                     percentage={results.risk_percent || 0}
                     label="Video Avg Risk"
@@ -257,7 +255,7 @@ export default function VideoAnalysis() {
                       ))}
                     </div>
                   )}
-                </motion.div>
+                </div>
               ) : (
                 <div className="flex flex-col items-center justify-center space-y-2 py-8 text-text-3">
                   <ShieldCheck size={22} className="opacity-30" />
@@ -297,6 +295,6 @@ export default function VideoAnalysis() {
         onConfirm={handleCancelConfirm}
         onCancel={() => setConfirmCancel(false)}
       />
-    </motion.div>
+    </div>
   );
 }

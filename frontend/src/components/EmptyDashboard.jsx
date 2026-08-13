@@ -1,8 +1,6 @@
 import React, { useRef, useCallback } from 'react';
-import { motion } from 'framer-motion';
 import { Shield, Upload, Cpu, CheckCircle, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { staggerFadeUp } from '../utils/animations';
 import { detectMediaRoute } from '../utils/format';
 import useForensicStore from '../store/useForensicStore';
 
@@ -25,23 +23,23 @@ export default function EmptyDashboard() {
   }, [navigate, setPendingFile]);
 
   return (
-    <motion.div initial="hidden" animate="visible" className="flex flex-col items-center justify-center py-12 px-4">
+    <div className="flex flex-col items-center justify-center py-12 px-4">
       {/* Shield icon */}
-      <motion.div variants={staggerFadeUp} custom={0} className="mb-6">
+      <div className="mb-6">
         <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-accent-dim border border-accent/20">
           <Shield size={30} className="text-accent" />
         </div>
-      </motion.div>
+      </div>
 
-      <motion.h2 variants={staggerFadeUp} custom={1} className="font-display text-2xl font-bold gradient-text mb-1">
+      <h2 className="font-display text-2xl font-bold gradient-text mb-1">
         System Ready
-      </motion.h2>
-      <motion.p variants={staggerFadeUp} custom={2} className="text-sm mb-8 text-text-3">
+      </h2>
+      <p className="text-sm mb-8 text-text-3">
         No scans yet. Start your first forensic analysis in three steps.
-      </motion.p>
+      </p>
 
       {/* Step cards */}
-      <motion.div variants={staggerFadeUp} custom={3} className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full max-w-xl mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full max-w-xl mb-8">
         {STEPS.map((step, i) => {
           const Icon = step.icon;
           return (
@@ -57,9 +55,9 @@ export default function EmptyDashboard() {
             </div>
           );
         })}
-      </motion.div>
+      </div>
 
-      <motion.div variants={staggerFadeUp} custom={4}>
+      <div>
         <input
           ref={fileInputRef}
           type="file"
@@ -75,7 +73,7 @@ export default function EmptyDashboard() {
           Start Your First Scan
           <ArrowRight size={15} />
         </button>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }

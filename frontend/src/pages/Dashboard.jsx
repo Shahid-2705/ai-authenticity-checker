@@ -90,18 +90,18 @@ export default function Dashboard() {
   const stats = STAT_DEFS(historyTotal, todayScans, `${modelsOnline}/${totalModels}`, riskCounts.clear, avgProcessingSec);
 
   return (
-    <motion.div initial="hidden" animate="visible" className="space-y-5"
+    <div className="space-y-5"
       onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
       onDragLeave={() => setDragOver(false)} onDrop={handleDrop}>
 
       {/* Header */}
-      <motion.div variants={staggerFadeUp} custom={0} className="flex items-start justify-between flex-wrap gap-4">
+      <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold tracking-tight text-text-1">Forensics Command Center</h1>
           <p className="text-sm mt-1 text-text-2 leading-relaxed">AI-powered deepfake detection & media authentication</p>
         </div>
         <span className="text-xs font-mono text-text-3">{modelsOnline}/{totalModels} models online</span>
-      </motion.div>
+      </div>
 
       {/* Hero: Avg Risk gauge + secondary stat stack */}
       <motion.div variants={staggerFadeUp} custom={1} className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -143,7 +143,7 @@ export default function Dashboard() {
       )}
 
       {/* Quick upload + analysis cards */}
-      <motion.div variants={staggerFadeUp} custom={3} className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div
           className={`card flex flex-col items-center justify-center text-center cursor-pointer min-h-[160px] border-dashed ${dragOver ? 'border-accent' : ''}`}
           onClick={() => fileInputRef.current?.click()}
@@ -163,24 +163,27 @@ export default function Dashboard() {
           <p className="text-xs mt-1 text-text-3">Drop any file or click to browse</p>
         </div>
         <div className="lg:col-span-2 grid grid-cols-2 gap-3">
-          {ANALYSIS_CARDS.map(({ to, label, desc, icon: Icon }) => (
-            <Link key={to} to={to} className="group card card-hover flex flex-col no-underline">
-              <div className="flex items-center justify-between mb-2">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent-dim">
-                  <Icon size={15} className="text-accent" />
+          {ANALYSIS_CARDS.map(({ to, label, desc, icon }) => {
+            const Icon = icon;
+            return (
+              <Link key={to} to={to} className="group card card-hover flex flex-col no-underline">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent-dim">
+                    <Icon size={15} className="text-accent" />
+                  </div>
+                  <ArrowUpRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity text-accent" />
                 </div>
-                <ArrowUpRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity text-accent" />
-              </div>
-              <span className="text-sm font-semibold text-text-1">{label}</span>
-              <span className="text-xs mt-0.5 text-text-3">{desc}</span>
-            </Link>
-          ))}
+                <span className="text-sm font-semibold text-text-1">{label}</span>
+                <span className="text-xs mt-0.5 text-text-3">{desc}</span>
+              </Link>
+            );
+          })}
         </div>
-      </motion.div>
+      </div>
 
       {/* Recent scans table */}
       {recentScans.length > 0 && (
-        <motion.div variants={staggerFadeUp} custom={4} className="card overflow-hidden !p-0">
+        <div className="card overflow-hidden !p-0">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border-dim">
             <div className="flex items-center gap-2">
               <Clock size={13} className="text-accent" />
@@ -218,8 +221,8 @@ export default function Dashboard() {
               })}
             </tbody>
           </table>
-        </motion.div>
+        </div>
       )}
-    </motion.div>
+    </div>
   );
 }
