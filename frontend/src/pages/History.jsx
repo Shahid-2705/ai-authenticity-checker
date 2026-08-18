@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Clock, Filter, Image, Film, Mic, Layers, ChevronRight } from 'lucide-react';
-import { fadeUp } from '../utils/animations';
 import { getRiskColorRaw, normalizeScore } from '../utils/risk';
 import { formatShortDateTime } from '../utils/format';
 import useForensicStore from '../store/useForensicStore';

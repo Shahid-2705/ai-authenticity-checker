@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getRiskColorRaw, getRiskGlow, getRiskLevel } from '../utils/risk';
+import { getRiskColorRaw, getRiskLevel } from '../utils/risk';
 import AnimatedNumber from './AnimatedNumber';
 
 export default function RiskGauge({ percentage, label = 'AI Risk Score', size = 160 }) {
